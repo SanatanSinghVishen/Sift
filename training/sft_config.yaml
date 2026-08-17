@@ -27,7 +27,7 @@ lora:
 training:
   per_device_train_batch_size: 1       # Minimum for 4 GB VRAM
   gradient_accumulation_steps: 8       # Effective batch size = 8
-  num_train_epochs: 3
+  num_train_epochs: 1                  # 10,000 samples in 1 epoch is optimal for QLoRA SFT
   learning_rate: 2.0e-4                # Standard for QLoRA
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.05
@@ -35,7 +35,8 @@ training:
   fp16: false
   bf16: true                           # RTX 3050 (Ampere) natively supports BF16
   logging_steps: 25
-  save_strategy: "epoch"
+  save_strategy: "steps"
+  save_steps: 250
   seed: 42
   optim: "adamw_8bit"                  # 8-bit optimizer for memory savings
 
