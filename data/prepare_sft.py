@@ -35,7 +35,8 @@ console = Console()
 # Constants
 # =============================================================================
 
-DATASET_ID = "Salesforce/xlam-function-calling-60k"
+DATASET_ID = "minpeter/xlam-function-calling-60k-parsed"
+FALLBACK_DATASET_ID = "Salesforce/xlam-function-calling-60k"
 DEFAULT_SAMPLE_SIZE = 10_000
 SEED = 42
 
@@ -47,64 +48,57 @@ SYSTEM_PROMPT = (
 )
 
 
-def format_tools_for_prompt(tools_raw: str) -> str:
+def format_tools_for_prompt(tools_raw) -> str:
     """
-    Parse the raw tools JSON string and re-serialize it cleanly.
-    The xlam dataset stores tools as a JSON string that may contain
-    nested stringified JSON — we normalize it here.
+    Parse the tools field and re-serialize it cleanly.
+    Handles both JSON string and parsed dictionary/list representations.
     """
+    if isinstance(tools_raw, (dict, list)):
+        return json.dumps(tools_raw, indent=2)
     try:
         tools = json.loads(tools_raw) if isinstance(tools_raw, str) else tools_raw
         return json.dumps(tools, indent=2)
     except (json.JSONDecodeError, TypeError):
-        return tools_raw
+        return str(tools_raw)
 
 
-def format_answer(answers_raw: str) -> str:
+def format_answer(answers_raw) -> str:
     """
-    Parse the raw answers JSON string and re-serialize it as compact JSON.
-    This is the 'ground truth' function call the model should learn to produce.
+    Parse the answers field and re-serialize it as compact JSON.
     """
+    if isinstance(answers_raw, (dict, list)):
+        return json.dumps(answers_raw, separators=(",", ":"))
     try:
         answers = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
         return json.dumps(answers, separators=(",", ":"))
     except (json.JSONDecodeError, TypeError):
-        return answers_raw
+        return str(answers_raw)
 
 
 def transform_row(row: dict) -> dict | None:
     """
     Transform a single xlam dataset row into a ChatML conversation.
-
-    Returns None if the row is malformed (missing fields, unparseable JSON).
     """
-    query = row.get("query", "").strip()
+    query = str(row.get("query", "")).strip()
     tools_raw = row.get("tools", "")
     answers_raw = row.get("answers", "")
 
-    # Skip rows with missing data
     if not query or not tools_raw or not answers_raw:
         return None
 
-    # Format the tools into readable JSON for the system prompt
     tools_formatted = format_tools_for_prompt(tools_raw)
-
-    # Format the answer as compact JSON (what the model should output)
     answer_formatted = format_answer(answers_raw)
 
-    # Validate that the answer is actually valid JSON
     try:
         json.loads(answer_formatted)
     except (json.JSONDecodeError, TypeError):
         return None
 
-    # Build the system message with embedded tool definitions
     system_content = (
         f"{SYSTEM_PROMPT}\n\n"
         f"Available tools:\n{tools_formatted}"
     )
 
-    # Construct the ChatML conversation
     conversation = {
         "conversations": [
             {"role": "system", "content": system_content},
@@ -118,75 +112,55 @@ def transform_row(row: dict) -> dict | None:
 
 def main(sample_size: int = DEFAULT_SAMPLE_SIZE, output_path: str = None):
     """
-    Main pipeline: Download → Sample → Transform → Validate → Save
+    Main pipeline: Fast Download → Sample → Transform → Validate → Save
     """
     if output_path is None:
         output_path = str(Path(__file__).parent / "sft_dataset.jsonl")
 
     console.print(f"\n[bold cyan]Sift — SFT Dataset Preparation[/bold cyan]")
-    console.print(f"  Source:      {DATASET_ID}")
+    console.print(f"  Source:      {DATASET_ID} (Salesforce XLAM-60K Parquet)")
     console.print(f"  Sample size: {sample_size:,}")
     console.print(f"  Output:      {output_path}\n")
 
     # -------------------------------------------------------------------------
-    # Step 1: Stream or Download dataset
+    # Step 1: Fast Download dataset (High-speed 26MB Parquet)
     # -------------------------------------------------------------------------
-    console.print("[yellow]⏳ Streaming dataset from Hugging Face (fetching only required rows)...[/yellow]")
+    console.print("[yellow]⏳ Downloading dataset (fast 26MB parquet)...[/yellow]")
     import os
     hf_token = os.environ.get("HF_TOKEN") or None
 
     try:
-        # Using streaming=True fetches rows on the fly in seconds
-        # without downloading the entire 60k dataset to disk!
-        streamed_dataset = load_dataset(
-            DATASET_ID,
-            split="train",
-            streaming=True,
-            token=hf_token
-        )
-    except Exception as e:
-        console.print(f"\n[red]✗ Failed to access dataset: {e}[/red]\n")
-        console.print("[yellow]Notice: 'Salesforce/xlam-function-calling-60k' is a gated dataset on Hugging Face.[/yellow]")
-        console.print("[cyan]Quick 2-step fix:[/cyan]")
-        console.print("  1. Open [bold]https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k[/bold] in your browser and click '[bold]Agree and access repository[/bold]'.")
-        console.print("  2. In your terminal, run:")
-        console.print("       [bold green]huggingface-cli login[/bold green]")
-        console.print("     (or set: [bold green]export HF_TOKEN=\"hf_your_token_here\"[/bold green])\n")
-        return
+        dataset = load_dataset(DATASET_ID, split="train", token=hf_token)
+        console.print(f"[green]✓ Downloaded {len(dataset):,} rows[/green]")
+    except Exception:
+        console.print(f"[yellow]Retrying with {FALLBACK_DATASET_ID}...[/yellow]")
+        dataset = load_dataset(FALLBACK_DATASET_ID, split="train", token=hf_token)
+        console.print(f"[green]✓ Downloaded {len(dataset):,} rows[/green]")
 
     # -------------------------------------------------------------------------
-    # Step 2: Stream, transform & sample rows on the fly
+    # Step 2: Shuffle and sample
+    # -------------------------------------------------------------------------
+    random.seed(SEED)
+    indices = list(range(len(dataset)))
+    random.shuffle(indices)
+    sampled_indices = indices[:sample_size]
+    console.print(f"[green]✓ Sampled {len(sampled_indices):,} rows (seed={SEED})[/green]")
+
+    # -------------------------------------------------------------------------
+    # Step 3: Transform each row into ChatML format
     # -------------------------------------------------------------------------
     transformed = []
     skipped = 0
-    total_processed = 0
 
-    # Shuffle buffer to get diverse samples while streaming
-    shuffled_stream = streamed_dataset.shuffle(seed=SEED, buffer_size=1000)
+    for idx in track(sampled_indices, description="Formatting ChatML rows..."):
+        row = dataset[idx]
+        result = transform_row(row)
+        if result is not None:
+            transformed.append(result)
+        else:
+            skipped += 1
 
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Streaming and formatting rows...", total=sample_size)
-
-        for row in shuffled_stream:
-            total_processed += 1
-            result = transform_row(row)
-            if result is not None:
-                transformed.append(result)
-                progress.advance(task)
-                if len(transformed) >= sample_size:
-                    break
-            else:
-                skipped += 1
-
-    console.print(f"[green]✓ Successfully prepared {len(transformed):,} rows (processed {total_processed:,})[/green]")
+    console.print(f"[green]✓ Successfully transformed {len(transformed):,} rows[/green]")
     if skipped > 0:
         console.print(f"[yellow]⚠ Skipped {skipped} malformed rows[/yellow]")
 
