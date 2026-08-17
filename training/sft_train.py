@@ -103,11 +103,19 @@ def main(config_path: str = None):
 
     from unsloth import FastLanguageModel
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=config["model"]["name"],
-        max_seq_length=config["model"]["max_seq_length"],
-        load_in_4bit=config["model"]["load_in_4bit"],
-    )
+    try:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config["model"]["name"],
+            max_seq_length=config["model"]["max_seq_length"],
+            load_in_4bit=config["model"]["load_in_4bit"],
+            local_files_only=True,
+        )
+    except Exception:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config["model"]["name"],
+            max_seq_length=config["model"]["max_seq_length"],
+            load_in_4bit=config["model"]["load_in_4bit"],
+        )
 
     console.print("[green]✓ Model loaded successfully[/green]")
 
