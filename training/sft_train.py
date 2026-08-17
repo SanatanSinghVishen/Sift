@@ -18,8 +18,6 @@ Usage:
 import os
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import json
 import yaml
