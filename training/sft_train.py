@@ -52,30 +52,37 @@ def load_sft_dataset(dataset_path: str) -> Dataset:
     return Dataset.from_list(rows)
 
 
-def formatting_func(examples: dict) -> list[str]:
+def formatting_func(examples: dict):
     """
     Format conversations into the tokenizer's chat template.
-    This function is called by SFTTrainer to convert raw conversations
-    into the exact text format the model expects.
-    
-    The tokenizer.apply_chat_template handles Qwen2.5's specific
-    ChatML formatting automatically.
+    Handles both batched dataset mapping and single-item verification passes.
     """
-    texts = []
-    conversations_batch = examples["conversations"]
+    if "conversations" not in examples:
+        return []
 
-    for conversations in conversations_batch:
-        # apply_chat_template is set on the tokenizer during training
-        # Here we just return the raw conversations for SFTTrainer
-        # to process with the tokenizer
-        text = tokenizer.apply_chat_template(
-            conversations,
+    convs = examples["conversations"]
+    if not convs:
+        return []
+
+    # Case 1: Batched dataset (list of conversations) -> list[list[dict]]
+    if isinstance(convs[0], list):
+        return [
+            tokenizer.apply_chat_template(
+                c,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            for c in convs
+        ]
+    # Case 2: Single example (list of messages) -> list[dict]
+    elif isinstance(convs[0], dict):
+        return tokenizer.apply_chat_template(
+            convs,
             tokenize=False,
             add_generation_prompt=False,
         )
-        texts.append(text)
 
-    return texts
+    return []
 
 
 def main(config_path: str = None):
