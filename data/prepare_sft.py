@@ -78,17 +78,66 @@ def format_answer(answers_raw) -> str:
 def transform_row(row: dict) -> dict | None:
     """
     Transform a single xlam dataset row into a ChatML conversation.
+    Supports both `messages` + `tools` schema and raw `query` + `answers` schema.
     """
-    query = str(row.get("query", "")).strip()
-    tools_raw = row.get("tools", "")
-    answers_raw = row.get("answers", "")
+    # -------------------------------------------------------------------------
+    # Format A: Pre-parsed messages format (minpeter/xlam-function-calling-60k-parsed)
+    # -------------------------------------------------------------------------
+    if "messages" in row and isinstance(row["messages"], (list, tuple)):
+        query = ""
+        answer_formatted = ""
 
-    if not query or not tools_raw or not answers_raw:
-        return None
+        for msg in row["messages"]:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            if role == "user":
+                query = str(msg.get("content", "")).strip()
+            elif role == "assistant":
+                if msg.get("tool_calls"):
+                    tool_calls = msg["tool_calls"]
+                    # Normalize tool calls into clean compact JSON
+                    normalized = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            fn = tc.get("function", {})
+                            if isinstance(fn, dict) and "name" in fn:
+                                args = fn.get("arguments", {})
+                                if isinstance(args, str):
+                                    try:
+                                        args = json.loads(args)
+                                    except Exception:
+                                        pass
+                                normalized.append({"name": fn["name"], "arguments": args})
+                            else:
+                                normalized.append(tc)
+                        else:
+                            normalized.append(tc)
+                    answer_formatted = json.dumps(normalized, separators=(",", ":"))
+                elif msg.get("content"):
+                    answer_formatted = format_answer(msg["content"])
 
-    tools_formatted = format_tools_for_prompt(tools_raw)
-    answer_formatted = format_answer(answers_raw)
+        tools_raw = row.get("tools", "")
+        if not query or not answer_formatted:
+            return None
 
+        tools_formatted = format_tools_for_prompt(tools_raw)
+
+    # -------------------------------------------------------------------------
+    # Format B: Raw query / tools / answers format (Salesforce/xlam-60k)
+    # -------------------------------------------------------------------------
+    else:
+        query = str(row.get("query", "")).strip()
+        tools_raw = row.get("tools", "")
+        answers_raw = row.get("answers", "")
+
+        if not query or not tools_raw or not answers_raw:
+            return None
+
+        tools_formatted = format_tools_for_prompt(tools_raw)
+        answer_formatted = format_answer(answers_raw)
+
+    # Ensure answer is valid JSON
     try:
         json.loads(answer_formatted)
     except (json.JSONDecodeError, TypeError):
