@@ -76,11 +76,12 @@ def formatting_func(examples: dict):
         ]
     # Case 2: Single example (list of messages) -> list[dict]
     elif isinstance(convs[0], dict):
-        return tokenizer.apply_chat_template(
+        text = tokenizer.apply_chat_template(
             convs,
             tokenize=False,
             add_generation_prompt=False,
         )
+        return [text]
 
     return []
 
