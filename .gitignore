@@ -1,0 +1,47 @@
+# Sift - Generated artifacts
+checkpoints/
+export/*.gguf
+data/sft_dataset.jsonl
+data/dpo_dataset.jsonl
+eval/results.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (web/)
+web/node_modules/
+web/.next/
+web/out/
+
+# Environment
+.env
+.env.local
+
+# Hugging Face
+*.safetensors
+*.bin
+*.gguf
+!export/export_gguf.py

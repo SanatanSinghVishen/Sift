@@ -1,0 +1,51 @@
+# =============================================================================
+# Sift — DPO Training Configuration
+# =============================================================================
+# Direct Preference Optimization alignment stage.
+# Runs AFTER SFT. Uses a lower learning rate to gently steer the model
+# away from hallucinated outputs without catastrophic forgetting.
+
+model:
+  # Load the SFT checkpoint, NOT the base model
+  name: "checkpoints/sft"
+  max_seq_length: 512
+  load_in_4bit: true
+
+lora:
+  r: 16
+  lora_alpha: 32
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  lora_dropout: 0
+  bias: "none"
+  use_gradient_checkpointing: "unsloth"
+
+training:
+  per_device_train_batch_size: 1       # DPO processes chosen+rejected = 2x memory
+  gradient_accumulation_steps: 4       # Smaller effective batch for DPO stability
+  num_train_epochs: 1                  # 1 epoch is typically sufficient for DPO
+  learning_rate: 5.0e-5                # Much lower LR than SFT
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  fp16: true
+  logging_steps: 10
+  save_strategy: "epoch"
+  seed: 42
+  optim: "adamw_8bit"
+
+dpo:
+  beta: 0.1                           # DPO temperature — controls preference strength
+  loss_type: "sigmoid"                 # Standard DPO loss
+
+data:
+  dataset_path: "data/dpo_dataset.jsonl"
+
+output:
+  dir: "checkpoints/dpo"
