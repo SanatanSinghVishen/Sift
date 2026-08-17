@@ -199,11 +199,17 @@ def main(config_path: str = None):
     )
 
     # =========================================================================
-    # Step 5: Train!
+    # Step 5: Train! (With auto-resume support)
     # =========================================================================
-    console.print("[bold green]🚀 Starting SFT training...[/bold green]\n")
+    from transformers.trainer_utils import get_last_checkpoint
+    last_checkpoint = get_last_checkpoint(output_dir) if Path(output_dir).exists() else None
 
-    train_result = trainer.train()
+    if last_checkpoint:
+        console.print(f"[yellow]📦 Resuming seamlessly from {last_checkpoint}...[/yellow]\n")
+        train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
+    else:
+        console.print("[bold green]🚀 Starting SFT training...[/bold green]\n")
+        train_result = trainer.train()
 
     # Print training summary
     console.print(f"\n[bold green]✓ Training complete![/bold green]")
