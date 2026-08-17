@@ -129,36 +129,64 @@ def main(sample_size: int = DEFAULT_SAMPLE_SIZE, output_path: str = None):
     console.print(f"  Output:      {output_path}\n")
 
     # -------------------------------------------------------------------------
-    # Step 1: Download the dataset
+    # Step 1: Stream or Download dataset
     # -------------------------------------------------------------------------
-    console.print("[yellow]⏳ Downloading dataset from Hugging Face...[/yellow]")
-    dataset = load_dataset(DATASET_ID, split="train")
-    console.print(f"[green]✓ Downloaded {len(dataset):,} rows[/green]")
+    console.print("[yellow]⏳ Streaming dataset from Hugging Face (fetching only required rows)...[/yellow]")
+    import os
+    hf_token = os.environ.get("HF_TOKEN") or None
+
+    try:
+        # Using streaming=True fetches rows on the fly in seconds
+        # without downloading the entire 60k dataset to disk!
+        streamed_dataset = load_dataset(
+            DATASET_ID,
+            split="train",
+            streaming=True,
+            token=hf_token
+        )
+    except Exception as e:
+        console.print(f"\n[red]✗ Failed to access dataset: {e}[/red]\n")
+        console.print("[yellow]Notice: 'Salesforce/xlam-function-calling-60k' is a gated dataset on Hugging Face.[/yellow]")
+        console.print("[cyan]Quick 2-step fix:[/cyan]")
+        console.print("  1. Open [bold]https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k[/bold] in your browser and click '[bold]Agree and access repository[/bold]'.")
+        console.print("  2. In your terminal, run:")
+        console.print("       [bold green]huggingface-cli login[/bold green]")
+        console.print("     (or set: [bold green]export HF_TOKEN=\"hf_your_token_here\"[/bold green])\n")
+        return
 
     # -------------------------------------------------------------------------
-    # Step 2: Shuffle and sample
-    # -------------------------------------------------------------------------
-    random.seed(SEED)
-    indices = list(range(len(dataset)))
-    random.shuffle(indices)
-    sampled_indices = indices[:sample_size]
-    console.print(f"[green]✓ Sampled {len(sampled_indices):,} rows (seed={SEED})[/green]")
-
-    # -------------------------------------------------------------------------
-    # Step 3: Transform each row into ChatML format
+    # Step 2: Stream, transform & sample rows on the fly
     # -------------------------------------------------------------------------
     transformed = []
     skipped = 0
+    total_processed = 0
 
-    for idx in track(sampled_indices, description="Transforming rows..."):
-        row = dataset[idx]
-        result = transform_row(row)
-        if result is not None:
-            transformed.append(result)
-        else:
-            skipped += 1
+    # Shuffle buffer to get diverse samples while streaming
+    shuffled_stream = streamed_dataset.shuffle(seed=SEED, buffer_size=1000)
 
-    console.print(f"[green]✓ Transformed {len(transformed):,} rows[/green]")
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Streaming and formatting rows...", total=sample_size)
+
+        for row in shuffled_stream:
+            total_processed += 1
+            result = transform_row(row)
+            if result is not None:
+                transformed.append(result)
+                progress.advance(task)
+                if len(transformed) >= sample_size:
+                    break
+            else:
+                skipped += 1
+
+    console.print(f"[green]✓ Successfully prepared {len(transformed):,} rows (processed {total_processed:,})[/green]")
     if skipped > 0:
         console.print(f"[yellow]⚠ Skipped {skipped} malformed rows[/yellow]")
 
