@@ -19,6 +19,10 @@ Usage:
   python training/dpo_train.py --config training/dpo_config.yaml
 """
 
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+
 import json
 import yaml
 import argparse
