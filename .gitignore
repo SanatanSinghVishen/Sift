@@ -1,5 +1,6 @@
 # Sift - Generated artifacts
 checkpoints/
+base_model/
 export/*.gguf
 data/sft_dataset.jsonl
 data/dpo_dataset.jsonl
