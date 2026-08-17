@@ -32,8 +32,8 @@ training:
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.05
   weight_decay: 0.01
-  fp16: true                           # Use FP16 mixed precision
-  bf16: false                          # RTX 3050 supports BF16 but FP16 is safer
+  fp16: false
+  bf16: true                           # RTX 3050 (Ampere) natively supports BF16
   logging_steps: 25
   save_strategy: "epoch"
   seed: 42
