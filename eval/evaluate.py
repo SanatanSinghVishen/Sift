@@ -215,33 +215,62 @@ def main(model_path: str = None, samples: int = 500):
     console.print()
 
     # =========================================================================
-    # Step 1: Load model
+    # Step 1: Load model (Unsloth on Linux/Colab, standard HuggingFace on Windows/CPU/GPU)
     # =========================================================================
     console.print(f"[yellow]⏳ Loading model from {model_path}...[/yellow]")
 
-    from unsloth import FastLanguageModel
-    base_model_id = "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit"
+    try:
+        from unsloth import FastLanguageModel
+        _has_unsloth = True
+    except ImportError:
+        _has_unsloth = False
 
-    if "SanatanSinghVishen" in model_path or not Path(model_path).exists():
-        console.print(f"[yellow]⏳ Loading base model {base_model_id}...[/yellow]")
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=base_model_id,
-            max_seq_length=512,
-            load_in_4bit=True,
-        )
-        console.print(f"[yellow]⏳ Attaching adapter from {model_path}...[/yellow]")
-        from peft import PeftModel
-        model = PeftModel.from_pretrained(model, model_path)
+    if _has_unsloth:
+        base_model_id = "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit"
+        if "SanatanSinghVishen" in model_path or not Path(model_path).exists():
+            console.print(f"[yellow]⏳ Loading base model {base_model_id}...[/yellow]")
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=base_model_id,
+                max_seq_length=512,
+                load_in_4bit=True,
+            )
+            console.print(f"[yellow]⏳ Attaching adapter from {model_path}...[/yellow]")
+            from peft import PeftModel
+            model = PeftModel.from_pretrained(model, model_path)
+        else:
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=model_path,
+                max_seq_length=512,
+                load_in_4bit=True,
+            )
+        FastLanguageModel.for_inference(model)
+        console.print("[green]✓ Model loaded in Unsloth fast inference mode[/green]")
     else:
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_path,
-            max_seq_length=512,
-            load_in_4bit=True,
-        )
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from peft import PeftModel
 
-    # Enable fast inference mode
-    FastLanguageModel.for_inference(model)
-    console.print("[green]✓ Model loaded in inference mode[/green]")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        base_id = "Qwen/Qwen2.5-1.5B-Instruct"
+        console.print(f"[yellow]⏳ Loading base model {base_id} (using {device})...[/yellow]")
+
+        tokenizer = AutoTokenizer.from_pretrained(base_id)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        model = AutoModelForCausalLM.from_pretrained(
+            base_id,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map="auto" if device == "cuda" else None,
+            low_cpu_mem_usage=True,
+        )
+        if device == "cpu":
+            model = model.to("cpu")
+
+        console.print(f"[yellow]⏳ Attaching DPO adapter from {model_path}...[/yellow]")
+        model = PeftModel.from_pretrained(model, model_path)
+        model.eval()
+        console.print(f"[green]✓ Model loaded in standard PyTorch inference mode on {device}[/green]")
 
     # =========================================================================
     # Step 2: Load holdout set
