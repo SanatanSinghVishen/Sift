@@ -110,6 +110,13 @@ def main(config_path: str = None):
     DPOTrainer.get_batch_samples = safe_get_batch_samples
     Trainer.get_batch_samples = safe_get_batch_samples
 
+    # Universal fix for Trainer.training_step passing num_items_in_batch to compute_loss in transformers >= 4.46
+    _orig_compute_loss = DPOTrainer.compute_loss
+    def safe_compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, **kwargs):
+        return _orig_compute_loss(self, model, inputs, return_outputs=return_outputs)
+
+    DPOTrainer.compute_loss = safe_compute_loss
+
     # DPOConfig exists in trl >= 0.9.0; older versions use TrainingArguments
     try:
         from trl import DPOConfig
@@ -384,9 +391,10 @@ def main(config_path: str = None):
             max_prompt_length=config["model"]["max_seq_length"] // 2,
         )
 
-    # Bind safe collator and safe_get_batch_samples directly to the trainer instance
+    # Bind safe collator, safe_get_batch_samples, and safe_compute_loss directly to the trainer instance
     dpo_trainer.data_collator = collator
     dpo_trainer.get_batch_samples = safe_get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
+    dpo_trainer.compute_loss = safe_compute_loss.__get__(dpo_trainer, type(dpo_trainer))
 
     # =========================================================================
     # Step 6: Train! (With auto-resume support)
