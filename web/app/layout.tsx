@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     "Qwen",
     "open source",
   ],
-  authors: [{ name: "Sanatan Singh Vishen" }],
+  authors: [{ name: "Sanatan Singh" }],
   openGraph: {
     title: "Sift-1B — Extract the signal. Route the action.",
     description:
