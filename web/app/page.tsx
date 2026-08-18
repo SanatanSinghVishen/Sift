@@ -144,9 +144,11 @@ export default function HomePage() {
 
   const handleContactSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setContactStatus("Message sent! Thanks for reaching out.");
+    const mailtoUrl = `mailto:sanatansinghgonda@gmail.com?subject=${encodeURIComponent(`Sift-1B Inquiry from ${contactForm.name}`)}&body=${encodeURIComponent(`Name: ${contactForm.name}\nEmail: ${contactForm.email}\n\nMessage:\n${contactForm.message}`)}`;
+    window.open(mailtoUrl, "_blank");
+    setContactStatus("Opening email client to send to sanatansinghgonda@gmail.com...");
     setContactForm({ name: "", email: "", message: "" });
-    setTimeout(() => setContactStatus(null), 4000);
+    setTimeout(() => setContactStatus(null), 5000);
   };
 
   return (
@@ -185,6 +187,14 @@ export default function HomePage() {
 
           {/* Right Actions */}
           <div className="flex items-center gap-4">
+            <a
+              href="https://huggingface.co/SanatanSinghVishen/sift-1b-gguf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-mono text-[#A1A1AA] hover:text-white transition-colors items-center gap-1.5 hidden sm:flex"
+            >
+              🤗 Hugging Face
+            </a>
             <a
               href="https://github.com/SanatanSinghVishen/Sift"
               target="_blank"
@@ -268,7 +278,7 @@ export default function HomePage() {
                   <span className="text-xs font-mono text-[#A1A1AA] uppercase tracking-wider shrink-0">
                     {label}
                   </span>
-                  <code className="text-xs sm:text-sm font-mono text-white/90 truncate">
+                  <code className="text-[11px] sm:text-xs md:text-sm font-mono text-white/90 overflow-x-auto whitespace-nowrap scrollbar-none">
                     $ {cmd}
                   </code>
                 </div>
@@ -290,9 +300,7 @@ export default function HomePage() {
       <section id="use-cases" className="py-24">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-14">
-            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-              Core Use Cases
-            </Badge>
+
             <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               Engineered for Routing & Parameter Extraction
             </h2>
@@ -381,7 +389,6 @@ export default function HomePage() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <span className="font-mono text-xs text-[#A1A1AA] uppercase tracking-wider">Example 1: Intent Routing</span>
-                    <Badge variant="outline" className="text-xs font-mono text-white border-white/20 rounded-full">Classification</Badge>
                   </div>
                   <div className="space-y-3 mb-4 font-mono text-xs">
                     <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
@@ -407,7 +414,6 @@ export default function HomePage() {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <span className="font-mono text-xs text-[#A1A1AA] uppercase tracking-wider">Example 2: Temporal Parameter Extraction</span>
-                    <Badge variant="outline" className="text-xs font-mono text-white border-white/20 rounded-full">Extraction</Badge>
                   </div>
                   <div className="space-y-3 mb-4 font-mono text-xs">
                     <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
@@ -438,9 +444,7 @@ export default function HomePage() {
       <section id="benchmarks" className="py-24 border-t border-[#27272A]/50 bg-[#080808]">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-14">
-            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-              Empirical Evaluation
-            </Badge>
+
             <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               Benchmarks & Specifications
             </h2>
@@ -484,9 +488,7 @@ export default function HomePage() {
                 <h3 className="font-medium text-base text-white">3-Tier Empirical Benchmark Progression</h3>
                 <p className="text-xs text-[#A1A1AA] font-mono mt-0.5">Base Qwen → SFT Checkpoint → Sift-1B (DPO Step 750)</p>
               </div>
-              <Badge variant="outline" className="text-white border-white/20 text-xs rounded-full bg-white/5">
-                Golden Checkpoint
-              </Badge>
+
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -558,9 +560,7 @@ export default function HomePage() {
       <section id="architecture" className="py-24">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-14">
-            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-              System Topology
-            </Badge>
+
             <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               SLM → Router → Execution Pipeline
             </h2>
@@ -608,9 +608,7 @@ export default function HomePage() {
       <section id="integration" className="py-24 border-t border-[#27272A]/50 bg-[#080808]">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-14">
-            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-              Developer Integration
-            </Badge>
+
             <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               Drop-In Cloud API Replacement
             </h2>
@@ -659,9 +657,7 @@ export default function HomePage() {
       <section id="faq" className="py-24 border-t border-[#27272A]/50">
         <div className="max-w-7xl mx-auto px-6">
           <div className="mb-14">
-            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-              Documentation
-            </Badge>
+
             <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               Frequently Asked Questions
             </h2>
@@ -705,9 +701,7 @@ export default function HomePage() {
 
             {/* Left Column: Author Info & Handles */}
             <div className="lg:col-span-5">
-              <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
-                Get in Touch
-              </Badge>
+
               <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
                 Connect with the Author
               </h2>
@@ -716,6 +710,15 @@ export default function HomePage() {
               </p>
 
               <div className="space-y-3">
+                <a
+                  href="mailto:sanatansinghgonda@gmail.com"
+                  className="flex items-center gap-3 px-5 py-3.5 rounded-full border border-[#27272A] bg-[#151515] text-sm text-[#A1A1AA] hover:text-white hover:border-white/30 transition-all group"
+                >
+                  <span className="text-xs">✉️</span>
+                  <span className="font-medium text-white/90">sanatansinghgonda@gmail.com</span>
+                  <span className="ml-auto text-xs text-white/40 group-hover:text-white transition-colors">↗</span>
+                </a>
+
                 <a
                   href="https://github.com/SanatanSinghVishen"
                   target="_blank"

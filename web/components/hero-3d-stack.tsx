@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { SiftLogo } from "./sift-logo";
 
 export function Hero3DStack() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,24 +110,12 @@ export function Hero3DStack() {
                 />
               )}
 
-              {/* Top Layer Sift Brand Monogram */}
+              {/* Top Layer Sift Brand Monogram & 3D Logo */}
               {layer.isTop && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="relative flex items-center justify-center">
-                    {/* Glowing S monogram */}
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-16 h-16 text-white/90 drop-shadow-[0_0_16px_rgba(255,255,255,0.4)]"
-                    >
-                      <path d="M4 8a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v1a3 3 0 0 1-3 3H7a3 3 0 0 0-3 3v1a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4" />
-                    </svg>
-                  </div>
-                  <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/50 mt-3 font-medium">
+                  {/* Glowing Sift Official 3D Geometry */}
+                  <SiftLogo className="w-20 h-20 drop-shadow-[0_12px_28px_rgba(225,29,72,0.45)] filter brightness-110" />
+                  <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/70 mt-4 font-medium flex items-center gap-2">
                     Sift · 1.5B
                   </span>
                 </div>
