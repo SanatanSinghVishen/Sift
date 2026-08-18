@@ -8,6 +8,7 @@ eval/results.json
 
 # Python
 __pycache__/
+unsloth_compiled_cache/
 *.py[cod]
 *$py.class
 *.egg-info/

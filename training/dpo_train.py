@@ -49,6 +49,18 @@ def load_dpo_dataset(dataset_path: str) -> Dataset:
       - chosen:   list with one assistant message (correct JSON)
       - rejected: list with one assistant message (mutated/broken)
     """
+    path = Path(dataset_path)
+    if not path.exists():
+        console.print(f"[yellow]⚠️ Dataset {dataset_path} not found. Auto-generating...[/yellow]")
+        sft_path = Path("data/sft_dataset.jsonl")
+        import subprocess
+        import sys
+        if not sft_path.exists():
+            console.print("[yellow]⏳ Generating SFT dataset first via prepare_sft.py...[/yellow]")
+            subprocess.run([sys.executable, "data/prepare_sft.py"], check=True)
+        console.print("[yellow]⏳ Generating DPO dataset via generate_dpo.py...[/yellow]")
+        subprocess.run([sys.executable, "data/generate_dpo.py"], check=True)
+
     rows = []
     with open(dataset_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -99,7 +111,7 @@ def main(config_path: str = None):
         )
         console.print(f"[yellow]⏳ Attaching SFT adapter from {model_path}...[/yellow]")
         from peft import PeftModel
-        model = PeftModel.from_pretrained(model, model_path)
+        model = PeftModel.from_pretrained(model, model_path, is_trainable=True)
     else:
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_path,
@@ -110,25 +122,31 @@ def main(config_path: str = None):
     console.print("[green]✓ SFT model loaded[/green]")
 
     # =========================================================================
-    # Step 3: Re-apply LoRA for DPO phase
+    # Step 3: Re-apply / Enable LoRA for DPO phase
     # =========================================================================
-    console.print("[yellow]⏳ Applying LoRA adapters for DPO...[/yellow]")
+    console.print("[yellow]⏳ Configuring LoRA adapters for DPO...[/yellow]")
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=config["lora"]["r"],
-        lora_alpha=config["lora"]["lora_alpha"],
-        target_modules=config["lora"]["target_modules"],
-        lora_dropout=config["lora"]["lora_dropout"],
-        bias=config["lora"]["bias"],
-        use_gradient_checkpointing=config["lora"]["use_gradient_checkpointing"],
-        random_state=config["training"]["seed"],
-    )
+    if not hasattr(model, "peft_config"):
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=config["lora"]["r"],
+            lora_alpha=config["lora"]["lora_alpha"],
+            target_modules=config["lora"]["target_modules"],
+            lora_dropout=config["lora"]["lora_dropout"],
+            bias=config["lora"]["bias"],
+            use_gradient_checkpointing=config["lora"]["use_gradient_checkpointing"],
+            random_state=config["training"]["seed"],
+        )
+    else:
+        FastLanguageModel.for_training(model)
+        for name, param in model.named_parameters():
+            if "lora" in name.lower() or "adapter" in name.lower():
+                param.requires_grad = True
 
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
     console.print(
-        f"[green]✓ LoRA applied — "
+        f"[green]✓ LoRA active — "
         f"Trainable: {trainable_params:,} / {total_params:,} "
         f"({100 * trainable_params / total_params:.2f}%)[/green]"
     )
