@@ -133,27 +133,38 @@ def evaluate_single(
     ]
 
     # Tokenize and generate
-    inputs = tokenizer.apply_chat_template(
+    encoded = tokenizer.apply_chat_template(
         prompt_messages,
         tokenize=True,
         add_generation_prompt=True,
         return_tensors="pt",
-    ).to(model.device)
+    )
+
+    if isinstance(encoded, dict) or hasattr(encoded, "input_ids"):
+        input_ids = encoded["input_ids"].to(model.device)
+        attention_mask = encoded.get("attention_mask", None)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(model.device)
+    else:
+        input_ids = encoded.to(model.device)
+        attention_mask = None
+
+    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
 
     start_time = time.perf_counter()
 
     outputs = model.generate(
-        input_ids=inputs,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
         max_new_tokens=256,
         do_sample=False,           # Greedy decoding for determinism
-        temperature=1.0,
-        top_p=1.0,
+        pad_token_id=pad_id,
     )
 
     ttft = (time.perf_counter() - start_time) * 1000  # ms
 
     # Decode only the generated tokens (exclude the prompt)
-    generated_ids = outputs[0][inputs.shape[-1]:]
+    generated_ids = outputs[0][input_ids.shape[-1]:]
     generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
     # ---- Metrics ----
