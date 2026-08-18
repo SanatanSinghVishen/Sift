@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sift-1B — Deterministic Function Calling SLM",
+  title: "Sift-1B",
   description:
     "A 1.5B-parameter Small Language Model fine-tuned via QLoRA + DPO for deterministic JSON function calling. Runs entirely on your hardware.",
   keywords: [
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Sanatan Singh" }],
   openGraph: {
-    title: "Sift-1B — Extract the signal. Route the action.",
+    title: "Sift-1B",
     description:
       "Ultra-fast 1.5B SLM for deterministic function calling. Zero API costs. Total data privacy.",
     type: "website",
