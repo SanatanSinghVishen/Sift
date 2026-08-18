@@ -93,7 +93,15 @@ def main(config_path: str = None):
     from unsloth import FastLanguageModel, PatchDPOTrainer
     PatchDPOTrainer()  # Must be called BEFORE importing DPOTrainer
 
-    from trl import DPOTrainer, DPOConfig
+    from trl import DPOTrainer
+    # DPOConfig exists in trl >= 0.9.0; older versions use TrainingArguments
+    try:
+        from trl import DPOConfig
+        _has_dpo_config = True
+    except ImportError:
+        from transformers import TrainingArguments
+        _has_dpo_config = False
+        console.print("[dim]ℹ Using TrainingArguments (trl < 0.9.0 detected)[/dim]")
 
     # =========================================================================
     # Step 2: Load the SFT-trained model
@@ -164,37 +172,68 @@ def main(config_path: str = None):
     output_dir = config["output"]["dir"]
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    training_args = DPOConfig(
-        output_dir=output_dir,
-        per_device_train_batch_size=config["training"]["per_device_train_batch_size"],
-        gradient_accumulation_steps=config["training"]["gradient_accumulation_steps"],
-        num_train_epochs=config["training"]["num_train_epochs"],
-        learning_rate=config["training"]["learning_rate"],
-        lr_scheduler_type=config["training"]["lr_scheduler_type"],
-        warmup_ratio=config["training"]["warmup_ratio"],
-        weight_decay=config["training"]["weight_decay"],
-        fp16=config["training"]["fp16"],
-        bf16=config["training"].get("bf16", True),
-        logging_steps=config["training"]["logging_steps"],
-        save_strategy=config["training"]["save_strategy"],
-        save_steps=config["training"].get("save_steps", 500),
-        dataset_num_proc=1,
-        dataloader_num_workers=0,
-        seed=config["training"]["seed"],
-        optim=config["training"]["optim"],
-        max_length=config["model"]["max_seq_length"],
-        max_prompt_length=config["model"]["max_seq_length"] // 2,
-        beta=config["dpo"]["beta"],
-        loss_type=config["dpo"]["loss_type"],
-        report_to="none",
-    )
-
-    dpo_trainer = DPOTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        tokenizer=tokenizer,
-    )
+    if _has_dpo_config:
+        # trl >= 0.9.0: all args go into DPOConfig
+        training_args = DPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=config["training"]["per_device_train_batch_size"],
+            gradient_accumulation_steps=config["training"]["gradient_accumulation_steps"],
+            num_train_epochs=config["training"]["num_train_epochs"],
+            learning_rate=config["training"]["learning_rate"],
+            lr_scheduler_type=config["training"]["lr_scheduler_type"],
+            warmup_ratio=config["training"]["warmup_ratio"],
+            weight_decay=config["training"]["weight_decay"],
+            fp16=config["training"]["fp16"],
+            bf16=config["training"].get("bf16", True),
+            logging_steps=config["training"]["logging_steps"],
+            save_strategy=config["training"]["save_strategy"],
+            save_steps=config["training"].get("save_steps", 500),
+            dataset_num_proc=1,
+            dataloader_num_workers=0,
+            seed=config["training"]["seed"],
+            optim=config["training"]["optim"],
+            max_length=config["model"]["max_seq_length"],
+            max_prompt_length=config["model"]["max_seq_length"] // 2,
+            beta=config["dpo"]["beta"],
+            loss_type=config["dpo"]["loss_type"],
+            report_to="none",
+        )
+        dpo_trainer = DPOTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+        )
+    else:
+        # trl < 0.9.0: DPO-specific args go into DPOTrainer constructor
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            per_device_train_batch_size=config["training"]["per_device_train_batch_size"],
+            gradient_accumulation_steps=config["training"]["gradient_accumulation_steps"],
+            num_train_epochs=config["training"]["num_train_epochs"],
+            learning_rate=config["training"]["learning_rate"],
+            lr_scheduler_type=config["training"]["lr_scheduler_type"],
+            warmup_ratio=config["training"]["warmup_ratio"],
+            weight_decay=config["training"]["weight_decay"],
+            fp16=config["training"]["fp16"],
+            bf16=config["training"].get("bf16", True),
+            logging_steps=config["training"]["logging_steps"],
+            save_strategy=config["training"]["save_strategy"],
+            save_steps=config["training"].get("save_steps", 500),
+            seed=config["training"]["seed"],
+            optim=config["training"]["optim"],
+            report_to="none",
+        )
+        dpo_trainer = DPOTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+            beta=config["dpo"]["beta"],
+            loss_type=config["dpo"]["loss_type"],
+            max_length=config["model"]["max_seq_length"],
+            max_prompt_length=config["model"]["max_seq_length"] // 2,
+        )
 
     # =========================================================================
     # Step 6: Train! (With auto-resume support)
