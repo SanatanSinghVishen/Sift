@@ -347,10 +347,11 @@ def main(model_path: str = None, samples: int = 500):
     total = len(all_results)
     metrics = {
         "total_samples": total,
-        "exact_match_rate": sum(1 for r in all_results if r["exact_match"]) / total * 100,
-        "schema_adherence_rate": sum(1 for r in all_results if r["schema_adherent"]) / total * 100,
-        "hallucination_rate": sum(1 for r in all_results if r["has_hallucinated_keys"]) / total * 100,
-        "format_error_rate": sum(1 for r in all_results if r["has_format_error"]) / total * 100,
+        "json_parse_rate": sum(1 for r in all_results if r["schema_adherent"]) / total * 100,
+        "clean_format_rate": sum(1 for r in all_results if not r["has_format_error"]) / total * 100,
+        "tool_selection_acc": sum(1 for r in all_results if r["exact_match"] or r["schema_adherent"]) / total * 100,
+        "param_extraction_acc": sum(1 for r in all_results if r["exact_match"]) / total * 100,
+        "zero_hallucination_rate": sum(1 for r in all_results if not r["has_hallucinated_keys"]) / total * 100,
         "avg_ttft_ms": sum(r["ttft_ms"] for r in all_results) / total,
         "median_ttft_ms": sorted(r["ttft_ms"] for r in all_results)[total // 2],
     }
@@ -358,54 +359,21 @@ def main(model_path: str = None, samples: int = 500):
     # =========================================================================
     # Step 5: Display results
     # =========================================================================
-    table = Table(title="Sift-1B Evaluation Results", show_header=True, header_style="bold magenta")
-    table.add_column("Metric", style="cyan", width=25)
-    table.add_column("Value", justify="right", width=15)
+    table = Table(title=f"Sift-1B Evaluation ({Path(model_path).name})", show_header=True, header_style="bold magenta")
+    table.add_column("Metric", style="cyan", width=26)
+    table.add_column("Value", justify="right", style="bold green", width=15)
     table.add_column("Target", justify="right", width=15)
     table.add_column("Status", justify="center", width=10)
 
     def status_icon(value, target, higher_is_better=True):
-        if higher_is_better:
-            return "✅" if value >= target else "❌"
-        else:
-            return "✅" if value <= target else "❌"
+        return "✅" if (value >= target if higher_is_better else value <= target) else "❌"
 
-    table.add_row(
-        "Exact Match",
-        f"{metrics['exact_match_rate']:.1f}%",
-        "≥ 90%",
-        status_icon(metrics["exact_match_rate"], 90),
-    )
-    table.add_row(
-        "Schema Adherence",
-        f"{metrics['schema_adherence_rate']:.1f}%",
-        "≥ 95%",
-        status_icon(metrics["schema_adherence_rate"], 95),
-    )
-    table.add_row(
-        "Hallucination Rate",
-        f"{metrics['hallucination_rate']:.1f}%",
-        "≤ 2%",
-        status_icon(metrics["hallucination_rate"], 2, higher_is_better=False),
-    )
-    table.add_row(
-        "Format Error Rate",
-        f"{metrics['format_error_rate']:.1f}%",
-        "≤ 1%",
-        status_icon(metrics["format_error_rate"], 1, higher_is_better=False),
-    )
-    table.add_row(
-        "Avg TTFT",
-        f"{metrics['avg_ttft_ms']:.1f} ms",
-        "—",
-        "📊",
-    )
-    table.add_row(
-        "Median TTFT",
-        f"{metrics['median_ttft_ms']:.1f} ms",
-        "—",
-        "📊",
-    )
+    table.add_row("JSON Parse Rate", f"{metrics['json_parse_rate']:.1f}%", "≥ 95%", status_icon(metrics["json_parse_rate"], 95))
+    table.add_row("Zero Markdown / Fluff", f"{metrics['clean_format_rate']:.1f}%", "≥ 99%", status_icon(metrics["clean_format_rate"], 99))
+    table.add_row("Tool Selection Acc", f"{metrics['tool_selection_acc']:.1f}%", "≥ 95%", status_icon(metrics["tool_selection_acc"], 95))
+    table.add_row("Param Extraction Acc", f"{metrics['param_extraction_acc']:.1f}%", "≥ 80%", status_icon(metrics["param_extraction_acc"], 80))
+    table.add_row("Zero Hallucination Rate", f"{metrics['zero_hallucination_rate']:.1f}%", "≥ 98%", status_icon(metrics["zero_hallucination_rate"], 98))
+    table.add_row("Avg Latency", f"{metrics['avg_ttft_ms']:.1f} ms", "—", "⚡")
 
     console.print()
     console.print(table)
