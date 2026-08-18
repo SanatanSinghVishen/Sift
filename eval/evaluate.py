@@ -178,8 +178,13 @@ def evaluate_single(
         "has_format_error": False,
     }
 
-    # 1. Exact Match
-    result["exact_match"] = generated_text == expected_output
+    # 1. Exact Match (Semantic JSON Equality)
+    try:
+        parsed_gen = json.loads(generated_text)
+        parsed_exp = json.loads(expected_output)
+        result["exact_match"] = (parsed_gen == parsed_exp)
+    except Exception:
+        result["exact_match"] = (generated_text.strip() == expected_output.strip())
 
     # 2. Schema Adherence (is it valid JSON?)
     try:
@@ -212,6 +217,16 @@ def evaluate_single(
 
     except (json.JSONDecodeError, TypeError):
         result["schema_adherent"] = False
+
+    # 4. Format Error (markdown wrappers, conversational text)
+    format_errors = [
+        "```json", "```", "sure", "certainly", "here is",
+        "let me", "of course", "i'd be happy", "great question",
+    ]
+    lower_text = generated_text.lower()
+    result["has_format_error"] = any(err in lower_text for err in format_errors)
+
+    return result
 
     # 4. Format Error (markdown wrappers, conversational text)
     format_errors = [
