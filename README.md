@@ -7,7 +7,8 @@
 A 1.5B-parameter Small Language Model fine-tuned via QLoRA + DPO for deterministic JSON function calling.  
 Runs entirely on your local hardware.
 
-[![Hugging Face](https://img.shields.io/badge/🤗%20Model-SanatanSinghVishen%2Fsift--1b-yellow)](https://huggingface.co/SanatanSinghVishen/sift-1b)
+[![Hugging Face GGUF](https://img.shields.io/badge/🤗%20GGUF-sift--1b--gguf-yellow)](https://huggingface.co/SanatanSinghVishen/sift-1b-gguf)
+[![Hugging Face DPO](https://img.shields.io/badge/🤗%20DPO%20Adapter-sift--1b--dpo-orange)](https://huggingface.co/SanatanSinghVishen/sift-1b-dpo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -24,7 +25,7 @@ Standard LLMs wrap their outputs in conversational fluff. Sift has been explicit
 
 ### Option 1: Ollama (Recommended)
 ```bash
-ollama run SanatanSinghVishen/sift-1b
+ollama run hf.co/SanatanSinghVishen/sift-1b-gguf
 ```
 
 ### Option 2: Python (OpenAI-Compatible)
