@@ -247,7 +247,7 @@ def main(config_path: str = None):
     console.print(f"[green]✓ Tokenized {len(tokenized):,} pairs[/green]")
 
     # =========================================================================
-    # Step 4: Collator & Reference DataLoader
+    # Step 4: Collator & DataLoader
     # =========================================================================
     pad_id = tokenizer.pad_token_id
 
@@ -263,107 +263,8 @@ def main(config_path: str = None):
                 torch.cat([torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long), s])
                 for s in seqs
             ])
-        if "ref_chosen_logp" in batch[0]:
-            result["ref_chosen_logp"] = torch.tensor([ex["ref_chosen_logp"] for ex in batch], dtype=torch.float32)
-            result["ref_rejected_logp"] = torch.tensor([ex["ref_rejected_logp"] for ex in batch], dtype=torch.float32)
         return result
 
-    # =========================================================================
-    # Step 5: Compute reference log-probs (frozen model) — cached to disk
-    # =========================================================================
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Use fp16 or bf16 based on hardware
-    _use_bf16 = False
-    if torch.cuda.is_available():
-        try:
-            _use_bf16 = torch.cuda.is_bf16_supported()
-        except Exception:
-            _use_bf16 = False
-    amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
-    console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
-
-    output_dir = config["output"]["dir"]
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    ref_cache_path = Path(output_dir) / "ref_logprobs.pt"
-    drive_backup_dir = Path("/content/drive/MyDrive/sift_dpo_backup")
-
-    # Check local cache first, then Google Drive backup
-    if not ref_cache_path.exists() and (drive_backup_dir / "ref_logprobs.pt").exists():
-        import shutil
-        console.print("[yellow]📂 Found cached reference log-probs in Google Drive! Restoring...[/yellow]")
-        shutil.copy(drive_backup_dir / "ref_logprobs.pt", ref_cache_path)
-
-    if ref_cache_path.exists():
-        console.print(f"[green]✓ Loading cached reference log-probs from {ref_cache_path}[/green]")
-        ref_cache = torch.load(ref_cache_path, weights_only=True)
-        ref_chosen_logps_all = ref_cache["chosen"]
-        ref_rejected_logps_all = ref_cache["rejected"]
-        console.print(f"[green]✓ Loaded {len(ref_chosen_logps_all):,} cached reference pairs[/green]")
-    else:
-        console.print("[yellow]⏳ Computing reference log-probabilities (frozen pass)...[/yellow]")
-        console.print("[dim]  (One-time pass — cached to disk so you never need to recompute)[/dim]")
-
-        # Use larger batch for reference pass (no gradients = less memory, fast ~5-7 min)
-        ref_dataloader = DataLoader(
-            tokenized,
-            batch_size=16,
-            shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=0,
-            pin_memory=True,
-        )
-
-        model.eval()
-        ref_chosen_logps_all = []
-        ref_rejected_logps_all = []
-
-        with torch.no_grad():
-            for i, batch in enumerate(ref_dataloader):
-                chosen_ids = batch["chosen_input_ids"].to(device)
-                chosen_mask = batch["chosen_attention_mask"].to(device)
-                chosen_labels = batch["chosen_labels"].to(device)
-                rejected_ids = batch["rejected_input_ids"].to(device)
-                rejected_mask = batch["rejected_attention_mask"].to(device)
-                rejected_labels = batch["rejected_labels"].to(device)
-
-                chosen_resp_mask = (chosen_labels != -100).long()
-                rejected_resp_mask = (rejected_labels != -100).long()
-
-                with torch.amp.autocast("cuda", dtype=amp_dtype):
-                    chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
-                    rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
-
-                ref_chosen_logps_all.append(
-                    compute_log_probs(chosen_out.logits.float(), chosen_ids, chosen_resp_mask).cpu()
-                )
-                ref_rejected_logps_all.append(
-                    compute_log_probs(rejected_out.logits.float(), rejected_ids, rejected_resp_mask).cpu()
-                )
-
-                if (i + 1) % 50 == 0 or (i + 1) == len(ref_dataloader):
-                    console.print(f"[dim]  Reference pass: {i + 1}/{len(ref_dataloader)} batches ({100 * (i + 1) / len(ref_dataloader):.1f}%)[/dim]")
-
-        ref_chosen_logps_all = torch.cat(ref_chosen_logps_all)
-        ref_rejected_logps_all = torch.cat(ref_rejected_logps_all)
-
-        torch.save({"chosen": ref_chosen_logps_all, "rejected": ref_rejected_logps_all}, ref_cache_path)
-        console.print(f"[green]✓ Reference log-probs cached to {ref_cache_path}[/green]")
-
-        # Mirror to Drive if mounted
-        if Path("/content/drive/MyDrive").exists():
-            drive_backup_dir.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copy(ref_cache_path, drive_backup_dir / "ref_logprobs.pt")
-            console.print(f"[dim]  Mirrored ref_logprobs.pt to Google Drive backup[/dim]")
-
-    # Attach cached reference log-probs directly to dataset
-    tokenized = tokenized.add_column("ref_chosen_logp", ref_chosen_logps_all.tolist())
-    tokenized = tokenized.add_column("ref_rejected_logp", ref_rejected_logps_all.tolist())
-
-    # =========================================================================
-    # Step 6: DPO Training Loop
-    # =========================================================================
     batch_size = config["training"]["per_device_train_batch_size"]
     grad_accum = config["training"]["gradient_accumulation_steps"]
 
@@ -376,6 +277,47 @@ def main(config_path: str = None):
         pin_memory=True,
     )
 
+    # =========================================================================
+    # Step 5: Check for Checkpoint Auto-Resume (Local or Google Drive)
+    # =========================================================================
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _use_bf16 = False
+    if torch.cuda.is_available():
+        try:
+            _use_bf16 = torch.cuda.is_bf16_supported()
+        except Exception:
+            _use_bf16 = False
+    amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
+    console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
+
+    output_dir = config["output"]["dir"]
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    drive_backup_dir = Path("/content/drive/MyDrive/sift_dpo_backup")
+
+    # Check for existing checkpoints to auto-resume
+    start_step = 0
+    existing_ckpts = sorted(
+        [d for d in Path(output_dir).glob("checkpoint-*") if d.is_dir()],
+        key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
+    )
+
+    # If no local checkpoint, check Drive backup
+    if not existing_ckpts and drive_backup_dir.exists():
+        drive_ckpts = sorted(
+            [d for d in drive_backup_dir.glob("checkpoint-*") if d.is_dir()],
+            key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
+        )
+        if drive_ckpts:
+            import shutil
+            latest_drive_ckpt = drive_ckpts[-1]
+            console.print(f"[bold yellow]📦 Found {latest_drive_ckpt.name} in Google Drive! Restoring...[/bold yellow]")
+            local_restore = Path(output_dir) / latest_drive_ckpt.name
+            shutil.copytree(latest_drive_ckpt, local_restore, dirs_exist_ok=True)
+            existing_ckpts = [local_restore]
+
+    # =========================================================================
+    # Step 6: DPO Training Loop (On-The-Fly Reference Evaluation)
+    # =========================================================================
     model.train()
 
     optimizer = torch.optim.AdamW(
@@ -399,48 +341,28 @@ def main(config_path: str = None):
     scheduler = LambdaLR(optimizer, lr_lambda)
     scaler = torch.amp.GradScaler("cuda")
 
-    # Check for existing checkpoints to auto-resume (local or Google Drive)
-    start_step = 0
-    existing_ckpts = sorted(
-        [d for d in Path(output_dir).glob("checkpoint-*") if d.is_dir()],
-        key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
-    )
-
-    # If no local checkpoint, check Drive backup
-    if not existing_ckpts and drive_backup_dir.exists():
-        drive_ckpts = sorted(
-            [d for d in drive_backup_dir.glob("checkpoint-*") if d.is_dir()],
-            key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
-        )
-        if drive_ckpts:
-            import shutil
-            latest_drive_ckpt = drive_ckpts[-1]
-            console.print(f"[yellow]📦 Found {latest_drive_ckpt.name} in Google Drive! Restoring...[/yellow]")
-            local_restore = Path(output_dir) / latest_drive_ckpt.name
-            shutil.copytree(latest_drive_ckpt, local_restore, dirs_exist_ok=True)
-            existing_ckpts = [local_restore]
-
     if existing_ckpts:
         latest_ckpt = existing_ckpts[-1]
         state_file = latest_ckpt / "training_state.pt"
         if state_file.exists():
-            console.print(f"[yellow]📦 Auto-resuming from {latest_ckpt}...[/yellow]")
+            console.print(f"[bold yellow]📦 Auto-resuming from {latest_ckpt}...[/bold yellow]")
             state = torch.load(state_file, weights_only=True)
             start_step = state["step"]
             optimizer.load_state_dict(state["optimizer"])
             scheduler.load_state_dict(state["scheduler"])
             scaler.load_state_dict(state["scaler"])
-            console.print(f"[green]✓ Resumed at step {start_step}/{total_steps}[/green]")
+            console.print(f"[bold green]✓ Successfully resumed at step {start_step}/{total_steps}![/bold green]")
 
     console.print(f"\n[bold green]🚀 Starting DPO alignment...[/bold green]")
     console.print(f"  Total steps:    {total_steps}")
-    console.print(f"  Warmup steps:   {warmup_steps}")
+    console.print(f"  Starting step:  {start_step}")
+    console.print(f"  Remaining:      {total_steps - start_step} steps")
     console.print(f"  Batch size:     {batch_size} × {grad_accum} = {batch_size * grad_accum}")
     console.print(f"  Beta:           {config['dpo']['beta']}\n")
 
     beta = config["dpo"]["beta"]
     log_steps = config["training"]["logging_steps"]
-    save_steps = config["training"].get("save_steps", 500)
+    save_steps = config["training"].get("save_steps", 250)
     global_step = start_step
     running_loss = 0.0
     running_margin = 0.0
@@ -462,20 +384,32 @@ def main(config_path: str = None):
         chosen_resp_mask = (chosen_labels != -100).long()
         rejected_resp_mask = (rejected_labels != -100).long()
 
-        ref_c = batch["ref_chosen_logp"].to(device)
-        ref_r = batch["ref_rejected_logp"].to(device)
-
+        # 1. Policy forward pass (active model with LoRA)
         with torch.amp.autocast("cuda", dtype=amp_dtype):
             chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+        policy_chosen_logps = compute_log_probs(chosen_out.logits, chosen_ids, chosen_resp_mask)
+        del chosen_out
+
+        with torch.amp.autocast("cuda", dtype=amp_dtype):
             rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+        policy_rejected_logps = compute_log_probs(rejected_out.logits, rejected_ids, rejected_resp_mask)
+        del rejected_out
 
-            policy_chosen_logps = compute_log_probs(
-                chosen_out.logits.float(), chosen_ids, chosen_resp_mask
-            )
-            policy_rejected_logps = compute_log_probs(
-                rejected_out.logits.float(), rejected_ids, rejected_resp_mask
-            )
+        # 2. Reference forward pass (on-the-fly with base model, LoRA disabled)
+        with torch.no_grad():
+            with model.disable_adapter():
+                with torch.amp.autocast("cuda", dtype=amp_dtype):
+                    ref_c_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+                ref_c = compute_log_probs(ref_c_out.logits, chosen_ids, chosen_resp_mask)
+                del ref_c_out
 
+                with torch.amp.autocast("cuda", dtype=amp_dtype):
+                    ref_r_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+                ref_r = compute_log_probs(ref_r_out.logits, rejected_ids, rejected_resp_mask)
+                del ref_r_out
+
+        # 3. Compute DPO Loss
+        with torch.amp.autocast("cuda", dtype=amp_dtype):
             loss, reward_margin = dpo_loss(
                 policy_chosen_logps, policy_rejected_logps,
                 ref_c, ref_r, beta=beta
