@@ -88,13 +88,26 @@ def main(config_path: str = None):
     # =========================================================================
     # Step 2: Load the SFT-trained model
     # =========================================================================
-    console.print("[yellow]⏳ Loading SFT checkpoint in 4-bit...[/yellow]")
+    model_path = config["model"]["name"]
+    base_model_id = "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit"
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=config["model"]["name"],
-        max_seq_length=config["model"]["max_seq_length"],
-        load_in_4bit=config["model"]["load_in_4bit"],
-    )
+    # If loading a Hugging Face LoRA adapter (e.g. SanatanSinghVishen/sift-1b-sft)
+    if "SanatanSinghVishen" in model_path or not Path(model_path).exists():
+        console.print(f"[yellow]⏳ Loading base model {base_model_id}...[/yellow]")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=base_model_id,
+            max_seq_length=config["model"]["max_seq_length"],
+            load_in_4bit=config["model"]["load_in_4bit"],
+        )
+        console.print(f"[yellow]⏳ Attaching SFT adapter from {model_path}...[/yellow]")
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, model_path)
+    else:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_path,
+            max_seq_length=config["model"]["max_seq_length"],
+            load_in_4bit=config["model"]["load_in_4bit"],
+        )
 
     console.print("[green]✓ SFT model loaded[/green]")
 
