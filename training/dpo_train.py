@@ -247,7 +247,33 @@ def main(config_path: str = None):
     console.print(f"[green]✓ Tokenized {len(tokenized):,} pairs[/green]")
 
     # =========================================================================
-    # Step 4: Collator & DataLoader
+    # Step 4: Check for Cached Reference Log-Probs (Local or Google Drive)
+    # =========================================================================
+    output_dir = config["output"]["dir"]
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    ref_cache_path = Path(output_dir) / "ref_logprobs.pt"
+    drive_backup_dir = Path("/content/drive/MyDrive/sift_dpo_backup")
+
+    has_ref_cache = False
+    if not ref_cache_path.exists() and (drive_backup_dir / "ref_logprobs.pt").exists():
+        import shutil
+        console.print("[bold yellow]📂 Restoring cached reference log-probs from Google Drive...[/bold yellow]")
+        shutil.copy(drive_backup_dir / "ref_logprobs.pt", ref_cache_path)
+
+    if ref_cache_path.exists():
+        console.print(f"[bold green]✓ Loading cached reference log-probs from {ref_cache_path}...[/bold green]")
+        ref_cache = torch.load(ref_cache_path, weights_only=True)
+        ref_chosen_logps_all = ref_cache["chosen"]
+        ref_rejected_logps_all = ref_cache["rejected"]
+        tokenized = tokenized.add_column("ref_chosen_logp", ref_chosen_logps_all.tolist())
+        tokenized = tokenized.add_column("ref_rejected_logp", ref_rejected_logps_all.tolist())
+        has_ref_cache = True
+        console.print(f"[bold green]✓ Loaded {len(ref_chosen_logps_all):,} reference pairs (2x faster training mode active!)[/bold green]")
+    else:
+        console.print("[dim]ℹ No ref_logprobs cache found — using on-the-fly reference pass[/dim]")
+
+    # =========================================================================
+    # Step 5: Collator & DataLoader
     # =========================================================================
     pad_id = tokenizer.pad_token_id
 
@@ -263,6 +289,9 @@ def main(config_path: str = None):
                 torch.cat([torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long), s])
                 for s in seqs
             ])
+        if "ref_chosen_logp" in batch[0]:
+            result["ref_chosen_logp"] = torch.tensor([ex["ref_chosen_logp"] for ex in batch], dtype=torch.float32)
+            result["ref_rejected_logp"] = torch.tensor([ex["ref_rejected_logp"] for ex in batch], dtype=torch.float32)
         return result
 
     batch_size = config["training"]["per_device_train_batch_size"]
@@ -276,23 +305,6 @@ def main(config_path: str = None):
         num_workers=0,
         pin_memory=True,
     )
-
-    # =========================================================================
-    # Step 5: Check for Checkpoint Auto-Resume (Local or Google Drive)
-    # =========================================================================
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    _use_bf16 = False
-    if torch.cuda.is_available():
-        try:
-            _use_bf16 = torch.cuda.is_bf16_supported()
-        except Exception:
-            _use_bf16 = False
-    amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
-    console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
-
-    output_dir = config["output"]["dir"]
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    drive_backup_dir = Path("/content/drive/MyDrive/sift_dpo_backup")
 
     # Check for existing checkpoints to auto-resume
     start_step = 0
@@ -316,8 +328,18 @@ def main(config_path: str = None):
             existing_ckpts = [local_restore]
 
     # =========================================================================
-    # Step 6: DPO Training Loop (On-The-Fly Reference Evaluation)
+    # Step 6: DPO Training Loop
     # =========================================================================
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _use_bf16 = False
+    if torch.cuda.is_available():
+        try:
+            _use_bf16 = torch.cuda.is_bf16_supported()
+        except Exception:
+            _use_bf16 = False
+    amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
+    console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
+
     model.train()
 
     optimizer = torch.optim.AdamW(
@@ -395,18 +417,22 @@ def main(config_path: str = None):
         policy_rejected_logps = compute_log_probs(rejected_out.logits, rejected_ids, rejected_resp_mask)
         del rejected_out
 
-        # 2. Reference forward pass (on-the-fly with base model, LoRA disabled)
-        with torch.no_grad():
-            with model.disable_adapter():
-                with torch.amp.autocast("cuda", dtype=amp_dtype):
-                    ref_c_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
-                ref_c = compute_log_probs(ref_c_out.logits, chosen_ids, chosen_resp_mask)
-                del ref_c_out
+        # 2. Reference log-probabilities (From cache or on-the-fly)
+        if has_ref_cache:
+            ref_c = batch["ref_chosen_logp"].to(device)
+            ref_r = batch["ref_rejected_logp"].to(device)
+        else:
+            with torch.no_grad():
+                with model.disable_adapter():
+                    with torch.amp.autocast("cuda", dtype=amp_dtype):
+                        ref_c_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+                    ref_c = compute_log_probs(ref_c_out.logits, chosen_ids, chosen_resp_mask)
+                    del ref_c_out
 
-                with torch.amp.autocast("cuda", dtype=amp_dtype):
-                    ref_r_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
-                ref_r = compute_log_probs(ref_r_out.logits, rejected_ids, rejected_resp_mask)
-                del ref_r_out
+                    with torch.amp.autocast("cuda", dtype=amp_dtype):
+                        ref_r_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+                    ref_r = compute_log_probs(ref_r_out.logits, rejected_ids, rejected_resp_mask)
+                    del ref_r_out
 
         # 3. Compute DPO Loss
         with torch.amp.autocast("cuda", dtype=amp_dtype):
