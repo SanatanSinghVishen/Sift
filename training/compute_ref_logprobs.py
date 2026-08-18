@@ -45,15 +45,21 @@ def load_dpo_dataset(dataset_path: str) -> Dataset:
 
 
 def compute_log_probs(logits, labels, mask):
-    shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = labels[:, 1:].contiguous()
-    shift_mask = mask[:, 1:].contiguous()
+    """
+    Memory-efficient per-token log probability computation.
+    Uses PyTorch's fused CrossEntropyLoss kernel to avoid allocating 
+    the massive (B, T, V) log_softmax tensor in VRAM.
+    """
+    shift_logits = logits[:, :-1, :]
+    shift_labels = torch.clamp(labels[:, 1:], min=0)
+    shift_mask = mask[:, 1:]
 
-    log_probs = F.log_softmax(shift_logits, dim=-1)
-    safe_labels = torch.clamp(shift_labels, min=0)
-    per_token_log_probs = log_probs.gather(2, safe_labels.unsqueeze(2)).squeeze(2)
-    per_token_log_probs = per_token_log_probs * shift_mask
-    return per_token_log_probs.sum(dim=-1)
+    B, T_minus_1, V = shift_logits.shape
+    # Fused CUDA kernel computes log-softmax + target gather in 1 pass
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    nll = loss_fn(shift_logits.reshape(-1, V), shift_labels.reshape(-1))
+    nll = nll.reshape(B, T_minus_1) * shift_mask
+    return -nll.sum(dim=-1).cpu()
 
 
 def main(config_path: str = None):
@@ -159,7 +165,7 @@ def main(config_path: str = None):
 
     ref_dataloader = DataLoader(
         tokenized,
-        batch_size=16,
+        batch_size=8,
         shuffle=False,
         collate_fn=collate_fn,
         num_workers=0,
@@ -180,7 +186,7 @@ def main(config_path: str = None):
     ref_chosen_logps_all = []
     ref_rejected_logps_all = []
 
-    console.print(f"[yellow]🚀 Computing reference log-probabilities with batch_size=16 ({len(ref_dataloader)} batches)...[/yellow]")
+    console.print(f"[yellow]🚀 Computing reference log-probabilities with batch_size=8 ({len(ref_dataloader)} batches)...[/yellow]")
 
     with torch.no_grad():
         for i, batch in enumerate(ref_dataloader):
@@ -194,18 +200,22 @@ def main(config_path: str = None):
             chosen_resp_mask = (chosen_labels != -100).long()
             rejected_resp_mask = (rejected_labels != -100).long()
 
+            # Sequential passes to keep peak VRAM under 3.5 GB
             with torch.amp.autocast("cuda", dtype=amp_dtype):
                 chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
-                rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
-
             ref_chosen_logps_all.append(
-                compute_log_probs(chosen_out.logits.float(), chosen_ids, chosen_resp_mask).cpu()
+                compute_log_probs(chosen_out.logits, chosen_ids, chosen_resp_mask)
             )
-            ref_rejected_logps_all.append(
-                compute_log_probs(rejected_out.logits.float(), rejected_ids, rejected_resp_mask).cpu()
-            )
+            del chosen_out
 
-            if (i + 1) % 50 == 0 or (i + 1) == len(ref_dataloader):
+            with torch.amp.autocast("cuda", dtype=amp_dtype):
+                rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+            ref_rejected_logps_all.append(
+                compute_log_probs(rejected_out.logits, rejected_ids, rejected_resp_mask)
+            )
+            del rejected_out
+
+            if (i + 1) % 100 == 0 or (i + 1) == len(ref_dataloader):
                 console.print(f"  [dim]Progress: {i + 1}/{len(ref_dataloader)} batches ({100 * (i + 1) / len(ref_dataloader):.1f}%)[/dim]")
 
     ref_chosen_logps_all = torch.cat(ref_chosen_logps_all)

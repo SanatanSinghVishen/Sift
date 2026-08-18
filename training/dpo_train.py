@@ -75,23 +75,20 @@ def load_dpo_dataset(dataset_path: str) -> Dataset:
 
 
 def compute_log_probs(logits, labels, mask):
-    """Compute per-token log probabilities for the given labels."""
-    # logits: (B, T, V), labels: (B, T), mask: (B, T)
-    # Shift so that token n predicts token n+1
-    shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = labels[:, 1:].contiguous()
-    shift_mask = mask[:, 1:].contiguous()
+    """
+    Memory-efficient per-token log probability computation.
+    Uses PyTorch's fused CrossEntropyLoss kernel to avoid allocating 
+    the massive (B, T, V) log_softmax tensor in VRAM.
+    """
+    shift_logits = logits[:, :-1, :]
+    shift_labels = torch.clamp(labels[:, 1:], min=0)
+    shift_mask = mask[:, 1:]
 
-    # Per-token log probs
-    log_probs = F.log_softmax(shift_logits, dim=-1)
-    
-    # Clamp negative label IDs (e.g. -100 prompt/pad labels) to 0 before gather
-    safe_labels = torch.clamp(shift_labels, min=0)
-    per_token_log_probs = log_probs.gather(2, safe_labels.unsqueeze(2)).squeeze(2)
-
-    # Strictly mask out prompt tokens and padding
-    per_token_log_probs = per_token_log_probs * shift_mask
-    return per_token_log_probs.sum(dim=-1)
+    B, T_minus_1, V = shift_logits.shape
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    nll = loss_fn(shift_logits.reshape(-1, V), shift_labels.reshape(-1))
+    nll = nll.reshape(B, T_minus_1) * shift_mask
+    return -nll.sum(dim=-1)
 
 
 def dpo_loss(policy_chosen_logps, policy_rejected_logps,
