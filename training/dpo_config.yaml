@@ -30,7 +30,7 @@ training:
   per_device_train_batch_size: 1       # DPO processes chosen+rejected = 2x memory
   gradient_accumulation_steps: 4       # Smaller effective batch for DPO stability
   num_train_epochs: 1                  # 1 epoch is typically sufficient for DPO
-  learning_rate: 5.0e-5                # Much lower LR than SFT
+  learning_rate: 5.0e-6                # Unsloth official baseline for DPO (5e-6)
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.1
   weight_decay: 0.01
