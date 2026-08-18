@@ -247,10 +247,11 @@ def main():
     del sft_model
 
     # 3. Evaluate DPO Model
-    console.print("\n[bold]Phase 3/3: Benchmarking DPO Model (Final Alignment)[/bold]")
-    dpo_model = PeftModel.from_pretrained(base_model, "SanatanSinghVishen/sift-1b-dpo")
+    dpo_model_path = args.dpo_path
+    console.print(f"\n[bold]Phase 3/3: Benchmarking DPO Model ({dpo_model_path})[/bold]")
+    dpo_model = PeftModel.from_pretrained(base_model, dpo_model_path)
     dpo_model.eval()
-    dpo_metrics = run_benchmark_for_model(dpo_model, tokenizer, test_samples, "Sift-1B (DPO Aligned)")
+    dpo_metrics = run_benchmark_for_model(dpo_model, tokenizer, test_samples, f"Sift-1B (DPO: {Path(dpo_model_path).name})")
 
     # =========================================================================
     # Print Publication Comparison Table
@@ -259,7 +260,7 @@ def main():
     table.add_column("Benchmark Metric", style="cyan", width=26)
     table.add_column("Qwen-1.5B (Base)", justify="right", width=18)
     table.add_column("Sift-1B (SFT)", justify="right", width=18)
-    table.add_column("Sift-1B (DPO - Ours)", justify="right", style="bold green", width=22)
+    table.add_column(f"Sift-1B ({Path(dpo_model_path).name})", justify="right", style="bold green", width=22)
 
     table.add_row(
         "JSON Parse Rate",
@@ -318,4 +319,11 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Full-Fledged Sift 3-Way Benchmark")
+    parser.add_argument("--samples", type=int, default=20, help="Number of holdout test samples")
+    parser.add_argument(
+        "--dpo-path", type=str,
+        default="SanatanSinghVishen/sift-1b-dpo",
+        help="Path or HF ID for DPO checkpoint (e.g. /content/drive/MyDrive/sift_dpo_backup/checkpoint-500)",
+    )
     main()
