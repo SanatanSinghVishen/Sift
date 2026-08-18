@@ -172,19 +172,40 @@ def main(config_path: str = None):
     output_dir = config["output"]["dir"]
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    # ---- Auto-detect precision (bf16 may fail on T4 / older drivers) --------
+    import torch
+    import math
+    _use_bf16 = False
+    _use_fp16 = False
+    if torch.cuda.is_available():
+        try:
+            _use_bf16 = torch.cuda.is_bf16_supported()
+        except Exception:
+            _use_bf16 = False
+        _use_fp16 = not _use_bf16
+    console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
+
+    # ---- Convert warmup_ratio → warmup_steps (deprecated in transformers v5) -
+    _batch = config["training"]["per_device_train_batch_size"]
+    _accum = config["training"]["gradient_accumulation_steps"]
+    _epochs = config["training"]["num_train_epochs"]
+    _total_steps = math.ceil(len(dataset) / (_batch * _accum)) * _epochs
+    _warmup_steps = int(config["training"]["warmup_ratio"] * _total_steps)
+    console.print(f"[dim]ℹ Warmup: {_warmup_steps} steps ({config['training']['warmup_ratio']} × {_total_steps})[/dim]")
+
     if _has_dpo_config:
         # trl >= 0.9.0: all args go into DPOConfig
         training_args = DPOConfig(
             output_dir=output_dir,
-            per_device_train_batch_size=config["training"]["per_device_train_batch_size"],
-            gradient_accumulation_steps=config["training"]["gradient_accumulation_steps"],
-            num_train_epochs=config["training"]["num_train_epochs"],
+            per_device_train_batch_size=_batch,
+            gradient_accumulation_steps=_accum,
+            num_train_epochs=_epochs,
             learning_rate=config["training"]["learning_rate"],
             lr_scheduler_type=config["training"]["lr_scheduler_type"],
-            warmup_ratio=config["training"]["warmup_ratio"],
+            warmup_steps=_warmup_steps,
             weight_decay=config["training"]["weight_decay"],
-            fp16=config["training"]["fp16"],
-            bf16=config["training"].get("bf16", True),
+            fp16=_use_fp16,
+            bf16=_use_bf16,
             logging_steps=config["training"]["logging_steps"],
             save_strategy=config["training"]["save_strategy"],
             save_steps=config["training"].get("save_steps", 500),
@@ -208,15 +229,15 @@ def main(config_path: str = None):
         # trl < 0.9.0: DPO-specific args go into DPOTrainer constructor
         training_args = TrainingArguments(
             output_dir=output_dir,
-            per_device_train_batch_size=config["training"]["per_device_train_batch_size"],
-            gradient_accumulation_steps=config["training"]["gradient_accumulation_steps"],
-            num_train_epochs=config["training"]["num_train_epochs"],
+            per_device_train_batch_size=_batch,
+            gradient_accumulation_steps=_accum,
+            num_train_epochs=_epochs,
             learning_rate=config["training"]["learning_rate"],
             lr_scheduler_type=config["training"]["lr_scheduler_type"],
-            warmup_ratio=config["training"]["warmup_ratio"],
+            warmup_steps=_warmup_steps,
             weight_decay=config["training"]["weight_decay"],
-            fp16=config["training"]["fp16"],
-            bf16=config["training"].get("bf16", True),
+            fp16=_use_fp16,
+            bf16=_use_bf16,
             logging_steps=config["training"]["logging_steps"],
             save_strategy=config["training"]["save_strategy"],
             save_steps=config["training"].get("save_steps", 500),
