@@ -5,7 +5,7 @@
 # All values are tuned to prevent OOM while maximizing training quality.
 
 model:
-  name: "base_model"
+  name: "Qwen/Qwen2.5-1.5B-Instruct"
   max_seq_length: 512
   load_in_4bit: true
 

@@ -242,7 +242,10 @@ def evaluate_single(
 def main(model_path: str = None, samples: int = 500):
     """Main evaluation pipeline."""
     if model_path is None:
-        model_path = "checkpoints/dpo"
+        if Path("checkpoints/dpo").exists():
+            model_path = "checkpoints/dpo"
+        else:
+            model_path = "SanatanSinghVishen/sift-1b-dpo"
 
     sft_data_path = str(Path(__file__).parent.parent / "data" / "sft_dataset.jsonl")
     results_path = str(Path(__file__).parent / "results.json")
