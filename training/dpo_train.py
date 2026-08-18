@@ -84,9 +84,12 @@ def compute_log_probs(logits, labels, mask):
 
     # Per-token log probs
     log_probs = F.log_softmax(shift_logits, dim=-1)
-    per_token_log_probs = log_probs.gather(2, shift_labels.unsqueeze(2)).squeeze(2)
+    
+    # Clamp negative label IDs (e.g. -100 prompt/pad labels) to 0 before gather
+    safe_labels = torch.clamp(shift_labels, min=0)
+    per_token_log_probs = log_probs.gather(2, safe_labels.unsqueeze(2)).squeeze(2)
 
-    # Mask out padding and sum
+    # Strictly mask out prompt tokens and padding
     per_token_log_probs = per_token_log_probs * shift_mask
     return per_token_log_probs.sum(dim=-1)
 
@@ -94,15 +97,19 @@ def compute_log_probs(logits, labels, mask):
 def dpo_loss(policy_chosen_logps, policy_rejected_logps,
              ref_chosen_logps, ref_rejected_logps,
              beta=0.1):
-    """Compute the DPO loss (sigmoid variant)."""
+    """
+    Direct Preference Optimization (DPO) loss from Rafailov et al. (2023).
+    
+    Loss = -E[log sigma(beta * (log(pi(yw|x)/pi_ref(yw|x)) - log(pi(yl|x)/pi_ref(yl|x))))]
+    """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = ref_chosen_logps - ref_rejected_logps
     logits = pi_logratios - ref_logratios
     loss = -F.logsigmoid(beta * logits).mean()
 
-    # Metrics
-    chosen_rewards = (policy_chosen_logps - ref_chosen_logps).detach()
-    rejected_rewards = (policy_rejected_logps - ref_rejected_logps).detach()
+    # Implicit rewards r(x, y) = beta * (log pi(y|x) - log pi_ref(y|x))
+    chosen_rewards = (beta * (policy_chosen_logps - ref_chosen_logps)).detach()
+    rejected_rewards = (beta * (policy_rejected_logps - ref_rejected_logps)).detach()
     reward_margin = (chosen_rewards - rejected_rewards).mean().item()
     return loss, reward_margin
 
