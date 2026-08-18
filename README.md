@@ -121,7 +121,7 @@ Evaluated across **unseen holdout function schemas** comparing Base Qwen vs. Sup
 ## Project Structure
 
 ```
-Sift/
+Sift-1B/
 ├── data/           # Dataset preparation & DPO mutation scripts
 ├── training/       # SFT & DPO training loops (Unsloth + TRL)
 ├── eval/           # Evaluation metrics & latency benchmarks

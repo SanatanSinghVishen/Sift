@@ -196,7 +196,7 @@ export default function HomePage() {
               🤗 Hugging Face
             </a>
             <a
-              href="https://github.com/SanatanSinghVishen/Sift"
+              href="https://github.com/SanatanSinghVishen/Sift-1B"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs font-mono text-[#A1A1AA] hover:text-white transition-colors items-center gap-1.5 hidden sm:flex"
@@ -720,13 +720,13 @@ export default function HomePage() {
                 </a>
 
                 <a
-                  href="https://github.com/SanatanSinghVishen"
+                  href="https://github.com/SanatanSinghVishen/Sift-1B"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 px-5 py-3.5 rounded-full border border-[#27272A] bg-[#151515] text-sm text-[#A1A1AA] hover:text-white hover:border-white/30 transition-all group"
                 >
                   <span className="font-mono text-white text-xs">GH</span>
-                  <span className="font-medium text-white/90">github.com/SanatanSinghVishen</span>
+                  <span className="font-medium text-white/90">github.com/SanatanSinghVishen/Sift-1B</span>
                   <span className="ml-auto text-xs text-white/40 group-hover:text-white transition-colors">↗</span>
                 </a>
 
