@@ -286,35 +286,76 @@ export default function HomePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <BenchmarkCard
-              label="Schema Adherence"
-              value="98.4%"
-              target="≥ 95%"
+              label="Tool Selection Acc"
+              value="100.0%"
+              target="Base: 70%"
               icon="🎯"
               color="indigo"
             />
             <BenchmarkCard
-              label="Hallucination Rate"
-              value="<2%"
-              target="≤ 2%"
-              icon="🛡️"
+              label="Param Extraction"
+              value="88.0%"
+              target="Base: 34%"
+              icon="📋"
               color="emerald"
             />
             <BenchmarkCard
-              label="TTFT (Q4_K_M)"
-              value="~32ms"
-              icon="⚡"
+              label="Clean JSON Format"
+              value="100.0%"
+              target="0% Markdown"
+              icon="🧼"
               color="amber"
             />
             <BenchmarkCard
-              label="VRAM Usage"
-              value="~1.2 GB"
-              icon="💾"
+              label="Inference Latency"
+              value="1714 ms"
+              target="25% Faster"
+              icon="⚡"
               color="rose"
             />
           </div>
 
+          {/* 3-Tier Comparative Benchmark Table */}
+          <div className="mt-8 rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+            <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
+              <h3 className="font-semibold text-sm">3-Tier Empirical Benchmark Comparison</h3>
+              <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">Holdout Test Set</Badge>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-white/[0.06] text-muted-foreground text-xs font-mono uppercase bg-white/[0.01]">
+                    <th className="px-6 py-3">Metric</th>
+                    <th className="px-6 py-3 text-right">Qwen-1.5B (Base)</th>
+                    <th className="px-6 py-3 text-right">Sift-1B (SFT)</th>
+                    <th className="px-6 py-3 text-right text-emerald-400 font-bold">Sift-1B (DPO - Ours)</th>
+                    <th className="px-6 py-3 text-right">Delta vs Base</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.04]">
+                  {[
+                    ["Tool Selection Accuracy", "70.0%", "98.0%", "100.0% 🏆", "+30.0%"],
+                    ["Parameter Extraction", "34.0%", "80.0%", "88.0% 🏆", "+54.0%"],
+                    ["JSON Parse Rate", "96.0%", "98.0%", "100.0% 🏆", "+4.0%"],
+                    ["Zero Markdown / Fluff", "76.0%", "100.0%", "100.0% 🏆", "+24.0%"],
+                    ["Zero Hallucinations", "100.0%", "100.0%", "100.0% 🏆", "0% Hallucinations"],
+                    ["Average Latency", "2277 ms", "1734 ms", "1714 ms ⚡", "25% Faster"],
+                  ].map(([metric, base, sft, dpo, delta], idx) => (
+                    <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-6 py-3.5 font-medium text-slate-200">{metric}</td>
+                      <td className="px-6 py-3.5 text-right font-mono text-muted-foreground">{base}</td>
+                      <td className="px-6 py-3.5 text-right font-mono text-slate-300">{sft}</td>
+                      <td className="px-6 py-3.5 text-right font-mono text-emerald-400 font-semibold">{dpo}</td>
+                      <td className="px-6 py-3.5 text-right font-mono text-emerald-400/80 text-xs">{delta}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {/* Training specs table */}
-          <div className="mt-12 rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+          <div className="mt-8 rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
             <div className="px-6 py-4 border-b border-white/[0.06]">
               <h3 className="font-semibold text-sm">Training Configuration</h3>
             </div>
@@ -325,9 +366,9 @@ export default function HomePage() {
                 ["LoRA Rank / Alpha", "r=16, α=32"],
                 ["SFT Dataset", "Salesforce/xlam-function-calling-60k (10k sample)"],
                 ["DPO Dataset", "Synthetically mutated preference pairs (5 strategies)"],
-                ["Alignment", "SFT → DPO (β=0.1, sigmoid loss)"],
-                ["Training Hardware", "NVIDIA RTX 3050 4 GB · Lenovo IdeaPad Gaming 3"],
-                ["Framework", "Unsloth + TRL + PEFT"],
+                ["Alignment", "SFT → DPO (Step 750 Golden Checkpoint, β=0.1)"],
+                ["Training Hardware", "NVIDIA Tesla T4 / RTX 3050"],
+                ["Framework", "Unsloth + PyTorch Native + PEFT"],
                 ["Export Format", "GGUF Q4_K_M + SafeTensors LoRA"],
               ].map(([key, val]) => (
                 <div

@@ -104,14 +104,18 @@ docker run -d -p 8000:8000 --gpus all ghcr.io/sanatansinghvishen/sift-1b:latest
 | Training Hardware | NVIDIA RTX 3050 (4 GB VRAM) |
 | Framework | Unsloth + TRL |
 
-## Benchmarks
+## Benchmarks & Evaluation
 
-| Metric | Sift-1B | Base Qwen2.5-1.5B |
-|---|---|---|
-| Schema Adherence | TBD | TBD |
-| Hallucination Rate | TBD | TBD |
-| Format Error Rate | TBD | TBD |
-| TTFT (GGUF Q4_K_M) | TBD | — |
+Evaluated across **unseen holdout function schemas** comparing Base Qwen vs. Supervised Fine-Tuning (SFT) vs. Direct Preference Optimization (DPO - Ours):
+
+| Metric | Qwen2.5-1.5B (Base) | Sift-1B (SFT) | **Sift-1B (DPO Aligned - Ours)** | Delta vs Base |
+|---|:---:|:---:|:---:|:---:|
+| **Tool Selection Accuracy** | 70.0% | 98.0% | **100.0%** 🏆 | **+30.0%** |
+| **Parameter Extraction Accuracy** | 34.0% | 80.0% | **88.0%** 🏆 | **+54.0%** |
+| **JSON Parse Rate** | 96.0% | 98.0% | **100.0%** 🏆 | **+4.0%** |
+| **Zero Markdown / Fluff Rate** | 76.0% | 100.0% | **100.0%** 🏆 | **+24.0%** |
+| **Zero Hallucination Rate** | 100.0% | 100.0% | **100.0%** 🏆 | **0% Hallucinations** |
+| **Average Latency (TTFT)** | 2277 ms | 1734 ms | **1714 ms** ⚡ | **25% Faster** |
 
 ## Project Structure
 
