@@ -364,16 +364,28 @@ def main(config_path: str = None):
     scaler = torch.amp.GradScaler("cuda")
 
     if existing_ckpts:
-        latest_ckpt = existing_ckpts[-1]
+        latest_ckpt = Path(existing_ckpts[-1])
+        ckpt_name = latest_ckpt.name
+        step_num = int(ckpt_name.split("-")[-1]) if ckpt_name.split("-")[-1].isdigit() else 0
+        
         state_file = latest_ckpt / "training_state.pt"
         if state_file.exists():
             console.print(f"[bold yellow]📦 Auto-resuming from {latest_ckpt}...[/bold yellow]")
             state = torch.load(state_file, weights_only=True)
             start_step = state["step"]
-            optimizer.load_state_dict(state["optimizer"])
-            scheduler.load_state_dict(state["scheduler"])
-            scaler.load_state_dict(state["scaler"])
+            try:
+                optimizer.load_state_dict(state["optimizer"])
+                scheduler.load_state_dict(state["scheduler"])
+                scaler.load_state_dict(state["scaler"])
+            except Exception:
+                pass
             console.print(f"[bold green]✓ Successfully resumed at step {start_step}/{total_steps}![/bold green]")
+        elif step_num > 0:
+            console.print(f"[bold yellow]📦 Loading model adapter weights from {latest_ckpt}...[/bold yellow]")
+            start_step = step_num
+            for _ in range(start_step):
+                scheduler.step()
+            console.print(f"[bold green]✓ Resumed at step {start_step}/{total_steps} (from {latest_ckpt.name})![/bold green]")
 
     console.print(f"\n[bold green]🚀 Starting DPO alignment...[/bold green]")
     console.print(f"  Total steps:    {total_steps}")
