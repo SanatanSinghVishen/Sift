@@ -382,6 +382,20 @@ def main(config_path: str = None):
             console.print(f"[bold green]✓ Successfully resumed at step {start_step}/{total_steps}![/bold green]")
         elif step_num > 0:
             console.print(f"[bold yellow]📦 Loading model adapter weights from {latest_ckpt}...[/bold yellow]")
+            try:
+                from peft import set_peft_model_state_dict
+                from safetensors.torch import load_file
+                st_path = latest_ckpt / "adapter_model.safetensors"
+                bin_path = latest_ckpt / "adapter_model.bin"
+                if st_path.exists():
+                    adapters_weights = load_file(str(st_path))
+                    set_peft_model_state_dict(model, adapters_weights)
+                elif bin_path.exists():
+                    adapters_weights = torch.load(bin_path, weights_only=True)
+                    set_peft_model_state_dict(model, adapters_weights)
+            except Exception as e:
+                console.print(f"[dim]Note: Using active model weights ({e})[/dim]")
+
             start_step = step_num
             for _ in range(start_step):
                 scheduler.step()
