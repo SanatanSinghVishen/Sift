@@ -325,6 +325,7 @@ def main(config_path: str = None):
             max_prompt_length=config["model"]["max_seq_length"] // 2,
             beta=config["dpo"]["beta"],
             loss_type=config["dpo"]["loss_type"],
+            remove_unused_columns=False,
             report_to="none",
         )
         dpo_trainer = DPOTrainer(
@@ -352,6 +353,7 @@ def main(config_path: str = None):
             save_steps=config["training"].get("save_steps", 500),
             seed=config["training"]["seed"],
             optim=config["training"]["optim"],
+            remove_unused_columns=False,
             report_to="none",
         )
 
