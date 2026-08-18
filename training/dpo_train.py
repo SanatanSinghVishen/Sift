@@ -94,12 +94,20 @@ def main(config_path: str = None):
     PatchDPOTrainer()  # Must be called BEFORE importing DPOTrainer
 
     from trl import DPOTrainer
+    from transformers import Trainer, TrainingArguments
+
+    # Fix: DPOTrainer in older TRL overrides get_batch_samples with an old 2-argument
+    # signature (epoch_iterator, num_batches), but modern transformers Trainer._run_epoch
+    # passes 3 arguments (epoch_iterator, num_batches, device).
+    # Re-binding to Trainer.get_batch_samples fixes this universally.
+    if hasattr(Trainer, "get_batch_samples"):
+        DPOTrainer.get_batch_samples = Trainer.get_batch_samples
+
     # DPOConfig exists in trl >= 0.9.0; older versions use TrainingArguments
     try:
         from trl import DPOConfig
         _has_dpo_config = True
     except ImportError:
-        from transformers import TrainingArguments
         _has_dpo_config = False
         console.print("[dim]ℹ Using TrainingArguments (trl < 0.9.0 detected)[/dim]")
 
@@ -291,6 +299,10 @@ def main(config_path: str = None):
             max_length=config["model"]["max_seq_length"],
             max_prompt_length=config["model"]["max_seq_length"] // 2,
         )
+
+    # Bind Trainer.get_batch_samples directly to the trainer instance to ensure compatibility
+    if hasattr(Trainer, "get_batch_samples"):
+        dpo_trainer.get_batch_samples = Trainer.get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
 
     # =========================================================================
     # Step 6: Train! (With auto-resume support)
