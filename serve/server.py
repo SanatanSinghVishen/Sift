@@ -214,31 +214,89 @@ async def chat_completions(request: ChatCompletionRequest):
 
 
 # =============================================================================
-# Startup
+# Inference Engine (Dual Support: GGUF via llama-cpp & HuggingFace via PEFT)
 # =============================================================================
 
+class HuggingFaceEngine:
+    """Fallback PyTorch / HuggingFace inference engine for serving adapters directly."""
+    def __init__(self, model_id_or_path: str):
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from peft import PeftModel
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        base_id = "Qwen/Qwen2.5-1.5B-Instruct"
+        print(f"⏳ Loading base model {base_id} on {self.device}...")
+
+        self.tokenizer = AutoTokenizer.from_pretrained(base_id)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_id,
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            device_map="auto" if self.device == "cuda" else None,
+            low_cpu_mem_usage=True,
+        )
+        if self.device == "cpu":
+            base_model = base_model.to("cpu")
+
+        print(f"⏳ Attaching adapter from {model_id_or_path}...")
+        self.model = PeftModel.from_pretrained(base_model, model_id_or_path)
+        self.model.eval()
+        print(f"✓ Sift DPO model ready for inference on {self.device}!")
+
+    def create_chat_completion(self, messages, max_tokens=256, temperature=0.0, top_p=1.0):
+        prompt_inputs = self.tokenizer.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True, return_tensors="pt"
+        ).to(self.model.device)
+
+        import torch
+        with torch.no_grad():
+            outputs = self.model.generate(
+                input_ids=prompt_inputs,
+                max_new_tokens=max_tokens,
+                do_sample=(temperature > 0),
+                temperature=temperature if temperature > 0 else 1.0,
+                top_p=top_p,
+            )
+        gen_ids = outputs[0][prompt_inputs.shape[-1]:]
+        text = self.tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+
+        return {
+            "choices": [{"message": {"content": text}}],
+            "usage": {
+                "prompt_tokens": prompt_inputs.shape[-1],
+                "completion_tokens": len(gen_ids),
+                "total_tokens": prompt_inputs.shape[-1] + len(gen_ids),
+            }
+        }
+
+
 def load_model(model_path: str, n_gpu_layers: int = -1, n_ctx: int = 2048):
-    """Load the GGUF model using llama-cpp-python."""
+    """Load model using GGUF (llama-cpp) or Hugging Face adapter."""
     global llm, MODEL_PATH
     MODEL_PATH = model_path
 
-    from llama_cpp import Llama
-
-    llm = Llama(
-        model_path=model_path,
-        n_gpu_layers=n_gpu_layers,
-        n_ctx=n_ctx,
-        verbose=False,
-    )
-    print(f"✓ Model loaded: {model_path}")
+    if model_path.endswith(".gguf") and Path(model_path).exists():
+        from llama_cpp import Llama
+        llm = Llama(
+            model_path=model_path,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            verbose=False,
+        )
+        print(f"✓ GGUF Model loaded: {model_path}")
+    else:
+        llm = HuggingFaceEngine(model_path)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sift-1B Inference Server")
     parser.add_argument(
         "--model", type=str,
-        default="export/sift-1b/unsloth.Q4_K_M.gguf",
-        help="Path to GGUF model file",
+        default="SanatanSinghVishen/sift-1b-dpo",
+        help="Path to GGUF model file or HuggingFace adapter ID",
     )
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", type=str, default="0.0.0.0")
