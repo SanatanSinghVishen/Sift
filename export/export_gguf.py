@@ -91,6 +91,26 @@ def main(
 
     merged_model.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
+
+    # Patch tokenizer_config.json: llama.cpp expects extra_special_tokens as
+    # a dict, but newer transformers saves it as a list. Fix it here.
+    import json as _json
+    tok_config_path = Path(merged_dir) / "tokenizer_config.json"
+    if tok_config_path.exists():
+        with open(tok_config_path, "r", encoding="utf-8") as f:
+            tok_config = _json.load(f)
+        changed = False
+        if "extra_special_tokens" in tok_config:
+            val = tok_config["extra_special_tokens"]
+            if isinstance(val, list):
+                # Convert list of token strings to a dict keyed by token name
+                tok_config["extra_special_tokens"] = {f"additional_special_token_{i}": t for i, t in enumerate(val)} if val else {}
+                changed = True
+        if changed:
+            with open(tok_config_path, "w", encoding="utf-8") as f:
+                _json.dump(tok_config, f, indent=2, ensure_ascii=False)
+            console.print("[green]  ✓ Patched tokenizer_config.json (extra_special_tokens fix)[/green]")
+
     console.print(f"[green]✓ Merged SafeTensors model saved to {merged_dir}/[/green]")
 
     # Free GPU memory before conversion
