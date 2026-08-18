@@ -142,6 +142,51 @@ def main(config_path: str = None):
             load_in_4bit=config["model"]["load_in_4bit"],
         )
 
+    # Ensure pad token is defined for DPO data collation
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+    if getattr(model.config, "pad_token_id", None) is None:
+        model.config.pad_token_id = tokenizer.pad_token_id
+
+    # Safe DPO data collator to handle None values in attention masks or labels
+    import torch
+    from torch.nn.utils.rnn import pad_sequence
+    import trl.trainer.utils as trl_utils
+
+    class SafeDPODataCollatorWithPadding:
+        def __init__(self, pad_token_id=0, label_pad_token_id=-100, is_encoder_decoder=False):
+            self.pad_token_id = pad_token_id if pad_token_id is not None else 0
+            self.label_pad_token_id = label_pad_token_id
+            self.is_encoder_decoder = is_encoder_decoder
+
+        def __call__(self, features):
+            batch = {}
+            for k in features[0].keys():
+                if k.endswith("_input_ids") or k.endswith("_attention_mask") or k.endswith("_labels"):
+                    valid_tensors = []
+                    for ex in features:
+                        val = ex.get(k)
+                        if val is None:
+                            if k.endswith("_attention_mask"):
+                                matching_ids_k = k.replace("_attention_mask", "_input_ids")
+                                ids_len = len(ex.get(matching_ids_k, []))
+                                val = [1] * ids_len
+                            else:
+                                val = []
+                        valid_tensors.append(torch.tensor(val, dtype=torch.long))
+
+                    pad_val = self.label_pad_token_id if k.endswith("_labels") else (
+                        0 if k.endswith("_attention_mask") else self.pad_token_id
+                    )
+                    batch[k] = pad_sequence(valid_tensors, batch_first=True, padding_value=pad_val)
+                elif isinstance(features[0][k], (int, float)):
+                    batch[k] = torch.tensor([ex[k] for ex in features])
+            return batch
+
+    trl_utils.DPODataCollatorWithPadding = SafeDPODataCollatorWithPadding
+
     console.print("[green]✓ SFT model loaded[/green]")
 
     # =========================================================================
