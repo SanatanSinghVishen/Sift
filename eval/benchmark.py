@@ -239,19 +239,44 @@ def main():
     console.print("\n[bold]Phase 1/3: Benchmarking Base Model (Zero-Shot)[/bold]")
     base_metrics = run_benchmark_for_model(base_model, tokenizer, test_samples, "Qwen2.5-1.5B (Base)")
 
-    # 2. Evaluate SFT Model
-    console.print("\n[bold]Phase 2/3: Benchmarking SFT Model[/bold]")
-    sft_model = PeftModel.from_pretrained(base_model, "SanatanSinghVishen/sift-1b-sft")
+    # 2. Evaluate SFT Model (Merged for max inference speed)
+    console.print("\n[bold]Phase 2/3: Benchmarking SFT Model (Fused Weights)[/bold]")
+    sft_base = AutoModelForCausalLM.from_pretrained(
+        base_id,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        low_cpu_mem_usage=True,
+    )
+    if device == "cpu":
+        sft_base = sft_base.to("cpu")
+    sft_peft = PeftModel.from_pretrained(sft_base, "SanatanSinghVishen/sift-1b-sft")
+    try:
+        sft_model = sft_peft.merge_and_unload()
+    except Exception:
+        sft_model = sft_peft
     sft_model.eval()
     sft_metrics = run_benchmark_for_model(sft_model, tokenizer, test_samples, "Sift-1B (SFT)")
-    del sft_model
+    del sft_model, sft_base
 
-    # 3. Evaluate DPO Model
+    # 3. Evaluate DPO Model (Merged for max inference speed)
     dpo_model_path = args.dpo_path
-    console.print(f"\n[bold]Phase 3/3: Benchmarking DPO Model ({dpo_model_path})[/bold]")
-    dpo_model = PeftModel.from_pretrained(base_model, dpo_model_path)
+    console.print(f"\n[bold]Phase 3/3: Benchmarking DPO Model ({dpo_model_path} - Fused)[/bold]")
+    dpo_base = AutoModelForCausalLM.from_pretrained(
+        base_id,
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+        device_map="auto" if device == "cuda" else None,
+        low_cpu_mem_usage=True,
+    )
+    if device == "cpu":
+        dpo_base = dpo_base.to("cpu")
+    dpo_peft = PeftModel.from_pretrained(dpo_base, dpo_model_path)
+    try:
+        dpo_model = dpo_peft.merge_and_unload()
+    except Exception:
+        dpo_model = dpo_peft
     dpo_model.eval()
     dpo_metrics = run_benchmark_for_model(dpo_model, tokenizer, test_samples, f"Sift-1B (DPO: {Path(dpo_model_path).name})")
+    del dpo_model, dpo_base
 
     # =========================================================================
     # Print Publication Comparison Table
