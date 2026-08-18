@@ -243,7 +243,7 @@ def main(config_path: str = None):
             model=model,
             args=training_args,
             train_dataset=dataset,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
         )
     else:
         # trl < 0.9.0: DPO-specific args go into DPOTrainer constructor
@@ -269,7 +269,7 @@ def main(config_path: str = None):
             model=model,
             args=training_args,
             train_dataset=dataset,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,
             beta=config["dpo"]["beta"],
             loss_type=config["dpo"]["loss_type"],
             max_length=config["model"]["max_seq_length"],
