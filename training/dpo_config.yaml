@@ -38,7 +38,7 @@ training:
   bf16: true
   logging_steps: 10
   save_strategy: "steps"
-  save_steps: 500
+  save_steps: 250
   seed: 42
   optim: "adamw_8bit"
 
