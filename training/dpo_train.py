@@ -265,11 +265,27 @@ def main(config_path: str = None):
             optim=config["training"]["optim"],
             report_to="none",
         )
+
+        # trl<0.9 passes `tokenizer=` to Trainer.__init__(), but
+        # transformers v5 renamed it to `processing_class`. Monkey-patch
+        # Trainer.__init__ to accept both names seamlessly.
+        import inspect
+        from transformers import Trainer as _Trainer
+        _orig_init = _Trainer.__init__
+        _trainer_params = inspect.signature(_orig_init).parameters
+        if "tokenizer" not in _trainer_params and "processing_class" in _trainer_params:
+            def _patched_init(self, *args, **kwargs):
+                if "tokenizer" in kwargs:
+                    kwargs["processing_class"] = kwargs.pop("tokenizer")
+                return _orig_init(self, *args, **kwargs)
+            _Trainer.__init__ = _patched_init
+            console.print("[dim]ℹ Patched Trainer.__init__ for tokenizer→processing_class[/dim]")
+
         dpo_trainer = DPOTrainer(
             model=model,
             args=training_args,
             train_dataset=dataset,
-            processing_class=tokenizer,
+            tokenizer=tokenizer,
             beta=config["dpo"]["beta"],
             loss_type=config["dpo"]["loss_type"],
             max_length=config["model"]["max_seq_length"],
