@@ -217,15 +217,27 @@ def main(model_path: str = None, samples: int = 500):
     # =========================================================================
     # Step 1: Load model
     # =========================================================================
-    console.print("[yellow]⏳ Loading model...[/yellow]")
+    console.print(f"[yellow]⏳ Loading model from {model_path}...[/yellow]")
 
     from unsloth import FastLanguageModel
+    base_model_id = "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit"
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_path,
-        max_seq_length=512,
-        load_in_4bit=True,
-    )
+    if "SanatanSinghVishen" in model_path or not Path(model_path).exists():
+        console.print(f"[yellow]⏳ Loading base model {base_model_id}...[/yellow]")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=base_model_id,
+            max_seq_length=512,
+            load_in_4bit=True,
+        )
+        console.print(f"[yellow]⏳ Attaching adapter from {model_path}...[/yellow]")
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, model_path)
+    else:
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_path,
+            max_seq_length=512,
+            load_in_4bit=True,
+        )
 
     # Enable fast inference mode
     FastLanguageModel.for_inference(model)
