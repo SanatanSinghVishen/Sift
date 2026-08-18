@@ -198,10 +198,16 @@ def run_benchmark_for_model(model, tokenizer, test_samples: list, model_name: st
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Full-Fledged Sift 3-Way Benchmark")
-    parser.add_argument("--samples", type=int, default=20, help="Number of holdout test samples")
-    args = parser.parse_args()
+def main(args=None):
+    if args is None:
+        parser = argparse.ArgumentParser(description="Full-Fledged Sift 3-Way Benchmark")
+        parser.add_argument("--samples", type=int, default=20, help="Number of holdout test samples")
+        parser.add_argument(
+            "--dpo-path", type=str,
+            default="SanatanSinghVishen/sift-1b-dpo",
+            help="Path or HF ID for DPO checkpoint (e.g. /content/drive/MyDrive/sift_dpo_backup/checkpoint-500)",
+        )
+        args = parser.parse_args()
 
     console.print(f"\n[bold cyan]================================================================[/bold cyan]")
     console.print(f"[bold cyan]       SIFT-1B COMPREHENSIVE 3-WAY MODEL BENCHMARK             [/bold cyan]")
