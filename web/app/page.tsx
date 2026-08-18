@@ -742,7 +742,7 @@ export default function HomePage() {
                 </a>
 
                 <a
-                  href="https://linkedin.com"
+                  href="https://linkedin.cA1om"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 px-5 py-3.5 rounded-full border border-[#27272A] bg-[#151515] text-sm text-[#A1A1AA] hover:text-white hover:border-white/30 transition-all group"

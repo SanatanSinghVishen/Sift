@@ -82,16 +82,20 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth !important;
+    scroll-padding-top: 90px;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+  }
   body {
     background-color: #0A0A0A;
     color: #FFFFFF;
     font-family: var(--font-sans), sans-serif;
     overflow-x: hidden;
-  }
-  html {
-    scroll-behavior: smooth;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
+    scroll-behavior: smooth !important;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
   html::-webkit-scrollbar,
   body::-webkit-scrollbar {
