@@ -6,12 +6,10 @@ over hallucinated, malformed, or conversational responses.
 
 This is Phase 3 of the Sift pipeline.
 
-The DPO loss function directly optimizes the model's log-probabilities
-to increase P(chosen) and decrease P(rejected), without requiring a
-separate reward model (unlike PPO/RLHF).
+This script implements DPO from scratch using only PyTorch + transformers,
+avoiding all trl version-compatibility issues.
 
-Hardware Target: NVIDIA RTX 3050 (4 GB VRAM)
-Expected VRAM Usage: ~3.2 GB peak (DPO processes both chosen+rejected)
+Hardware Target: NVIDIA T4 / RTX 3050 (4–16 GB VRAM)
 Expected Training Time: 1-2 hours (10k pairs, 1 epoch)
 
 Usage:
@@ -25,10 +23,14 @@ os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
 
 import json
 import yaml
+import math
 import argparse
 from pathlib import Path
 
+import torch
+import torch.nn.functional as F
 from datasets import Dataset
+from torch.utils.data import DataLoader
 from rich.console import Console
 
 console = Console()
@@ -72,8 +74,41 @@ def load_dpo_dataset(dataset_path: str) -> Dataset:
     return Dataset.from_list(rows)
 
 
+def compute_log_probs(logits, labels, mask):
+    """Compute per-token log probabilities for the given labels."""
+    # logits: (B, T, V), labels: (B, T), mask: (B, T)
+    # Shift so that token n predicts token n+1
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
+    shift_mask = mask[:, 1:].contiguous()
+
+    # Per-token log probs
+    log_probs = F.log_softmax(shift_logits, dim=-1)
+    per_token_log_probs = log_probs.gather(2, shift_labels.unsqueeze(2)).squeeze(2)
+
+    # Mask out padding and sum
+    per_token_log_probs = per_token_log_probs * shift_mask
+    return per_token_log_probs.sum(dim=-1)
+
+
+def dpo_loss(policy_chosen_logps, policy_rejected_logps,
+             ref_chosen_logps, ref_rejected_logps,
+             beta=0.1):
+    """Compute the DPO loss (sigmoid variant)."""
+    pi_logratios = policy_chosen_logps - policy_rejected_logps
+    ref_logratios = ref_chosen_logps - ref_rejected_logps
+    logits = pi_logratios - ref_logratios
+    loss = -F.logsigmoid(beta * logits).mean()
+
+    # Metrics
+    chosen_rewards = (policy_chosen_logps - ref_chosen_logps).detach()
+    rejected_rewards = (policy_rejected_logps - ref_rejected_logps).detach()
+    reward_margin = (chosen_rewards - rejected_rewards).mean().item()
+    return loss, reward_margin
+
+
 def main(config_path: str = None):
-    """Main DPO training loop."""
+    """Main DPO training loop — implemented from scratch, no trl dependency."""
     if config_path is None:
         config_path = str(Path(__file__).parent / "dpo_config.yaml")
 
@@ -88,50 +123,13 @@ def main(config_path: str = None):
     console.print()
 
     # =========================================================================
-    # Step 1: Patch DPOTrainer with Unsloth optimizations
+    # Step 1: Load model with Unsloth
     # =========================================================================
-    from unsloth import FastLanguageModel, PatchDPOTrainer
-    PatchDPOTrainer()  # Must be called BEFORE importing DPOTrainer
+    from unsloth import FastLanguageModel
 
-    from trl import DPOTrainer
-    from transformers import Trainer, TrainingArguments
-
-    # Universal fix for Trainer._run_epoch calling get_batch_samples with varying arguments
-    def safe_get_batch_samples(self, epoch_iterator, num_batches, device=None):
-        batch_samples = []
-        num_items_in_batch = None
-        for _ in range(num_batches):
-            try:
-                batch_samples.append(next(epoch_iterator))
-            except StopIteration:
-                break
-        return batch_samples, num_items_in_batch
-
-    DPOTrainer.get_batch_samples = safe_get_batch_samples
-    Trainer.get_batch_samples = safe_get_batch_samples
-
-    # Universal fix for Trainer.training_step passing num_items_in_batch to compute_loss in transformers >= 4.46
-    _orig_compute_loss = DPOTrainer.compute_loss
-    def safe_compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, **kwargs):
-        return _orig_compute_loss(self, model, inputs, return_outputs=return_outputs)
-
-    DPOTrainer.compute_loss = safe_compute_loss
-
-    # DPOConfig exists in trl >= 0.9.0; older versions use TrainingArguments
-    try:
-        from trl import DPOConfig
-        _has_dpo_config = True
-    except ImportError:
-        _has_dpo_config = False
-        console.print("[dim]ℹ Using TrainingArguments (trl < 0.9.0 detected)[/dim]")
-
-    # =========================================================================
-    # Step 2: Load the SFT-trained model
-    # =========================================================================
     model_path = config["model"]["name"]
     base_model_id = "unsloth/Qwen2.5-1.5B-Instruct-bnb-4bit"
 
-    # If loading a Hugging Face LoRA adapter (e.g. SanatanSinghVishen/sift-1b-sft)
     if "SanatanSinghVishen" in model_path or not Path(model_path).exists():
         console.print(f"[yellow]⏳ Loading base model {base_model_id}...[/yellow]")
         model, tokenizer = FastLanguageModel.from_pretrained(
@@ -149,83 +147,17 @@ def main(config_path: str = None):
             load_in_4bit=config["model"]["load_in_4bit"],
         )
 
-    # Ensure pad token is defined for DPO data collation
+    # Ensure pad token
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
-    if getattr(model.config, "pad_token_id", None) is None:
-        model.config.pad_token_id = tokenizer.pad_token_id
-
-    # Safe DPO data collator to handle None values in attention masks or labels
-    import torch
-    from torch.nn.utils.rnn import pad_sequence
-    import trl.trainer.utils as trl_utils
-    import trl.trainer.dpo_trainer as dpo_module
-
-    class SafeDPODataCollatorWithPadding:
-        def __init__(self, pad_token_id=151643, label_pad_token_id=-100, is_encoder_decoder=False):
-            self.pad_token_id = pad_token_id if pad_token_id is not None else 151643
-            self.label_pad_token_id = label_pad_token_id if label_pad_token_id is not None else -100
-            self.is_encoder_decoder = is_encoder_decoder
-
-        def __call__(self, features):
-            padded_batch = {}
-            for k in features[0].keys():
-                if k.endswith("_input_ids") or k.endswith("_attention_mask") or k.endswith("_labels"):
-                    to_pad = []
-                    for ex in features:
-                        val = ex.get(k)
-                        if val is None:
-                            if k.endswith("_attention_mask"):
-                                match_k = k.replace("_attention_mask", "_input_ids")
-                                ids_len = len(ex.get(match_k) or [])
-                                val = [1] * ids_len
-                            elif k.endswith("_labels"):
-                                match_k = k.replace("_labels", "_input_ids")
-                                ids_len = len(ex.get(match_k) or [])
-                                val = [self.label_pad_token_id] * ids_len
-                            else:
-                                val = [self.pad_token_id]
-                        
-                        if isinstance(val, torch.Tensor):
-                            val = val.tolist()
-                        elif not isinstance(val, list):
-                            val = [val] if val is not None else [0]
-                        
-                        clean_val = [x if x is not None else (0 if "attention_mask" in k else self.pad_token_id) for x in val]
-                        if len(clean_val) == 0:
-                            clean_val = [0 if "attention_mask" in k else self.pad_token_id]
-
-                        if "prompt" in k:
-                            to_pad.append(torch.tensor(clean_val[::-1], dtype=torch.long))
-                        else:
-                            to_pad.append(torch.tensor(clean_val, dtype=torch.long))
-
-                    if k.endswith("_input_ids"):
-                        pad_val = self.pad_token_id
-                    elif k.endswith("_labels"):
-                        pad_val = self.label_pad_token_id
-                    elif k.endswith("_attention_mask"):
-                        pad_val = 0
-                    else:
-                        pad_val = self.pad_token_id
-
-                    padded_batch[k] = pad_sequence(to_pad, batch_first=True, padding_value=pad_val)
-                    if "prompt" in k:
-                        padded_batch[k] = padded_batch[k].flip(dims=[1])
-                elif isinstance(features[0][k], (int, float)):
-                    padded_batch[k] = torch.tensor([ex[k] for ex in features])
-            return padded_batch
-
-    trl_utils.DPODataCollatorWithPadding = SafeDPODataCollatorWithPadding
-    dpo_module.DPODataCollatorWithPadding = SafeDPODataCollatorWithPadding
-    collator = SafeDPODataCollatorWithPadding(pad_token_id=tokenizer.pad_token_id)
+    tokenizer.padding_side = "left"
 
     console.print("[green]✓ SFT model loaded[/green]")
 
     # =========================================================================
-    # Step 3: Re-apply / Enable LoRA for DPO phase
+    # Step 2: Configure LoRA for DPO
     # =========================================================================
     console.print("[yellow]⏳ Configuring LoRA adapters for DPO...[/yellow]")
 
@@ -237,14 +169,18 @@ def main(config_path: str = None):
             target_modules=config["lora"]["target_modules"],
             lora_dropout=config["lora"]["lora_dropout"],
             bias=config["lora"]["bias"],
-            use_gradient_checkpointing=config["lora"]["use_gradient_checkpointing"],
+            use_gradient_checkpointing=False,  # Disabled for transformers v5 compatibility
             random_state=config["training"]["seed"],
         )
     else:
-        FastLanguageModel.for_training(model)
+        # Already has LoRA — just enable training
         for name, param in model.named_parameters():
             if "lora" in name.lower() or "adapter" in name.lower():
                 param.requires_grad = True
+
+    # Explicitly disable gradient checkpointing to avoid _gradient_checkpointing_func errors
+    if hasattr(model, "gradient_checkpointing_disable"):
+        model.gradient_checkpointing_disable()
 
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
@@ -255,170 +191,265 @@ def main(config_path: str = None):
     )
 
     # =========================================================================
-    # Step 4: Load DPO dataset
+    # Step 3: Load & tokenize DPO dataset
     # =========================================================================
-    dataset = load_dpo_dataset(config["data"]["dataset_path"])
+    raw_dataset = load_dpo_dataset(config["data"]["dataset_path"])
 
-    # ---- Format dataset for trl compatibility --------------------------------
-    # trl < 0.9.0 expects prompt/chosen/rejected as plain strings.
-    # Our dataset stores them as ChatML message lists. Apply chat_template
-    # to flatten them when needed.
-    if not _has_dpo_config:
-        console.print("[dim]ℹ Formatting dataset for trl < 0.9.0 (messages → strings)...[/dim]")
+    max_len = config["model"]["max_seq_length"]
+    max_prompt_len = max_len // 2
 
-        def _format_row(row):
-            # prompt: list of {role, content} → single string via chat template
-            prompt_str = tokenizer.apply_chat_template(
-                row["prompt"], tokenize=False, add_generation_prompt=True
-            )
-            # chosen/rejected: list with one assistant message → extract content
-            chosen_str = row["chosen"][0]["content"] if isinstance(row["chosen"], list) else row["chosen"]
-            rejected_str = row["rejected"][0]["content"] if isinstance(row["rejected"], list) else row["rejected"]
-            return {"prompt": prompt_str, "chosen": chosen_str, "rejected": rejected_str}
+    console.print("[yellow]⏳ Tokenizing preference pairs...[/yellow]")
 
-        dataset = dataset.map(_format_row, num_proc=1)
-        console.print(f"[green]✓ Dataset formatted ({len(dataset):,} rows)[/green]")
+    def tokenize_pair(row):
+        """Tokenize a single DPO preference pair into prompt + chosen/rejected."""
+        # Build prompt string
+        prompt_msgs = row["prompt"]
+        prompt_str = tokenizer.apply_chat_template(
+            prompt_msgs, tokenize=False, add_generation_prompt=True
+        )
+
+        # Extract chosen/rejected text
+        chosen_text = row["chosen"][0]["content"] if isinstance(row["chosen"], list) else row["chosen"]
+        rejected_text = row["rejected"][0]["content"] if isinstance(row["rejected"], list) else row["rejected"]
+
+        # Tokenize prompt
+        prompt_enc = tokenizer(prompt_str, truncation=True, max_length=max_prompt_len,
+                               add_special_tokens=False)
+
+        # Tokenize chosen response (prompt + chosen)
+        chosen_full = prompt_str + chosen_text + tokenizer.eos_token
+        chosen_enc = tokenizer(chosen_full, truncation=True, max_length=max_len,
+                               add_special_tokens=False)
+
+        # Tokenize rejected response (prompt + rejected)
+        rejected_full = prompt_str + rejected_text + tokenizer.eos_token
+        rejected_enc = tokenizer(rejected_full, truncation=True, max_length=max_len,
+                                 add_special_tokens=False)
+
+        prompt_len = len(prompt_enc["input_ids"])
+
+        return {
+            "chosen_input_ids": chosen_enc["input_ids"],
+            "chosen_attention_mask": chosen_enc["attention_mask"],
+            "chosen_labels": [-100] * min(prompt_len, len(chosen_enc["input_ids"])) +
+                             chosen_enc["input_ids"][prompt_len:],
+            "rejected_input_ids": rejected_enc["input_ids"],
+            "rejected_attention_mask": rejected_enc["attention_mask"],
+            "rejected_labels": [-100] * min(prompt_len, len(rejected_enc["input_ids"])) +
+                               rejected_enc["input_ids"][prompt_len:],
+        }
+
+    tokenized = raw_dataset.map(tokenize_pair, remove_columns=raw_dataset.column_names, num_proc=1)
+    console.print(f"[green]✓ Tokenized {len(tokenized):,} pairs[/green]")
 
     # =========================================================================
-    # Step 5: Initialize DPOTrainer
+    # Step 4: Collator & DataLoader
     # =========================================================================
-    console.print("[yellow]⏳ Initializing DPO Trainer...[/yellow]")
+    pad_id = tokenizer.pad_token_id
 
-    output_dir = config["output"]["dir"]
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    def collate_fn(batch):
+        """Pad chosen and rejected sequences to the same length within the batch."""
+        result = {}
+        for key in ["chosen_input_ids", "chosen_attention_mask", "chosen_labels",
+                     "rejected_input_ids", "rejected_attention_mask", "rejected_labels"]:
+            seqs = [torch.tensor(ex[key], dtype=torch.long) for ex in batch]
+            pad_val = -100 if "labels" in key else (0 if "mask" in key else pad_id)
+            max_seq_len = max(s.size(0) for s in seqs)
+            padded = []
+            for s in seqs:
+                padding = torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long)
+                padded.append(torch.cat([padding, s]) if "chosen" in key or "rejected" in key else torch.cat([s, padding]))
+                # Left-pad for causal LM
+            result[key] = torch.stack([torch.cat([torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long), s]) for s in seqs])
+        return result
 
-    # ---- Auto-detect precision (bf16 may fail on T4 / older drivers) --------
-    import torch
-    import math
+    batch_size = config["training"]["per_device_train_batch_size"]
+    grad_accum = config["training"]["gradient_accumulation_steps"]
+
+    dataloader = DataLoader(
+        tokenized,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=0,
+        pin_memory=True,
+    )
+
+    # =========================================================================
+    # Step 5: Compute reference log-probs (frozen model)
+    # =========================================================================
+    console.print("[yellow]⏳ Computing reference log-probabilities (frozen pass)...[/yellow]")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Use fp16 or bf16 based on hardware
     _use_bf16 = False
-    _use_fp16 = False
     if torch.cuda.is_available():
         try:
             _use_bf16 = torch.cuda.is_bf16_supported()
         except Exception:
             _use_bf16 = False
-        _use_fp16 = not _use_bf16
+    amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
     console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
 
-    # ---- Convert warmup_ratio → warmup_steps (deprecated in transformers v5) -
-    _batch = config["training"]["per_device_train_batch_size"]
-    _accum = config["training"]["gradient_accumulation_steps"]
-    _epochs = config["training"]["num_train_epochs"]
-    _total_steps = math.ceil(len(dataset) / (_batch * _accum)) * _epochs
-    _warmup_steps = int(config["training"]["warmup_ratio"] * _total_steps)
-    console.print(f"[dim]ℹ Warmup: {_warmup_steps} steps ({config['training']['warmup_ratio']} × {_total_steps})[/dim]")
+    model.eval()
+    ref_chosen_logps_all = []
+    ref_rejected_logps_all = []
 
-    if _has_dpo_config:
-        # trl >= 0.9.0: all args go into DPOConfig
-        training_args = DPOConfig(
-            output_dir=output_dir,
-            per_device_train_batch_size=_batch,
-            gradient_accumulation_steps=_accum,
-            num_train_epochs=_epochs,
-            learning_rate=config["training"]["learning_rate"],
-            lr_scheduler_type=config["training"]["lr_scheduler_type"],
-            warmup_steps=_warmup_steps,
-            weight_decay=config["training"]["weight_decay"],
-            fp16=_use_fp16,
-            bf16=_use_bf16,
-            logging_steps=config["training"]["logging_steps"],
-            save_strategy=config["training"]["save_strategy"],
-            save_steps=config["training"].get("save_steps", 500),
-            dataset_num_proc=1,
-            dataloader_num_workers=0,
-            seed=config["training"]["seed"],
-            optim=config["training"]["optim"],
-            max_length=config["model"]["max_seq_length"],
-            max_prompt_length=config["model"]["max_seq_length"] // 2,
-            beta=config["dpo"]["beta"],
-            loss_type=config["dpo"]["loss_type"],
-            remove_unused_columns=False,
-            report_to="none",
-        )
-        dpo_trainer = DPOTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=dataset,
-            processing_class=tokenizer,
-            data_collator=collator,
-        )
-    else:
-        # trl < 0.9.0: DPO-specific args go into DPOTrainer constructor
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=_batch,
-            gradient_accumulation_steps=_accum,
-            num_train_epochs=_epochs,
-            learning_rate=config["training"]["learning_rate"],
-            lr_scheduler_type=config["training"]["lr_scheduler_type"],
-            warmup_steps=_warmup_steps,
-            weight_decay=config["training"]["weight_decay"],
-            fp16=_use_fp16,
-            bf16=_use_bf16,
-            logging_steps=config["training"]["logging_steps"],
-            save_strategy=config["training"]["save_strategy"],
-            save_steps=config["training"].get("save_steps", 500),
-            seed=config["training"]["seed"],
-            optim=config["training"]["optim"],
-            remove_unused_columns=False,
-            report_to="none",
-        )
+    with torch.no_grad():
+        for i, batch in enumerate(dataloader):
+            chosen_ids = batch["chosen_input_ids"].to(device)
+            chosen_mask = batch["chosen_attention_mask"].to(device)
+            chosen_labels = batch["chosen_labels"].to(device)
+            rejected_ids = batch["rejected_input_ids"].to(device)
+            rejected_mask = batch["rejected_attention_mask"].to(device)
+            rejected_labels = batch["rejected_labels"].to(device)
 
-        # trl<0.9 passes `tokenizer=` to Trainer.__init__(), but
-        # transformers v5 renamed it to `processing_class`. Monkey-patch
-        # Trainer.__init__ to accept both names seamlessly.
-        import inspect
-        from transformers import Trainer as _Trainer
-        _orig_init = _Trainer.__init__
-        _trainer_params = inspect.signature(_orig_init).parameters
-        if "tokenizer" not in _trainer_params and "processing_class" in _trainer_params:
-            def _patched_init(self, *args, **kwargs):
-                if "tokenizer" in kwargs:
-                    kwargs["processing_class"] = kwargs.pop("tokenizer")
-                return _orig_init(self, *args, **kwargs)
-            _Trainer.__init__ = _patched_init
-            console.print("[dim]ℹ Patched Trainer.__init__ for tokenizer→processing_class[/dim]")
+            # Create response mask (where labels != -100)
+            chosen_resp_mask = (chosen_labels != -100).long()
+            rejected_resp_mask = (rejected_labels != -100).long()
 
-        dpo_trainer = DPOTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=dataset,
-            tokenizer=tokenizer,
-            data_collator=collator,
-            beta=config["dpo"]["beta"],
-            loss_type=config["dpo"]["loss_type"],
-            max_length=config["model"]["max_seq_length"],
-            max_prompt_length=config["model"]["max_seq_length"] // 2,
-        )
+            with torch.amp.autocast("cuda", dtype=amp_dtype):
+                chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+                rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
 
-    # Bind safe collator, safe_get_batch_samples, and safe_compute_loss directly to the trainer instance
-    dpo_trainer.data_collator = collator
-    dpo_trainer.get_batch_samples = safe_get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
-    dpo_trainer.compute_loss = safe_compute_loss.__get__(dpo_trainer, type(dpo_trainer))
+            ref_chosen_logps_all.append(
+                compute_log_probs(chosen_out.logits.float(), chosen_ids, chosen_resp_mask).cpu()
+            )
+            ref_rejected_logps_all.append(
+                compute_log_probs(rejected_out.logits.float(), rejected_ids, rejected_resp_mask).cpu()
+            )
+
+            if (i + 1) % 500 == 0:
+                console.print(f"[dim]  Reference pass: {i + 1}/{len(dataloader)} batches[/dim]")
+
+    ref_chosen_logps_all = torch.cat(ref_chosen_logps_all)
+    ref_rejected_logps_all = torch.cat(ref_rejected_logps_all)
+    console.print(f"[green]✓ Reference log-probs computed ({len(ref_chosen_logps_all):,} pairs)[/green]")
 
     # =========================================================================
-    # Step 6: Train! (With auto-resume support)
+    # Step 6: DPO Training Loop
     # =========================================================================
-    from transformers.trainer_utils import get_last_checkpoint
-    last_checkpoint = get_last_checkpoint(output_dir) if Path(output_dir).exists() else None
+    model.train()
 
-    if last_checkpoint:
-        console.print(f"[yellow]📦 Resuming DPO from {last_checkpoint}...[/yellow]\n")
-        train_result = dpo_trainer.train(resume_from_checkpoint=last_checkpoint)
-    else:
-        console.print("[bold green]🚀 Starting DPO alignment...[/bold green]\n")
-        train_result = dpo_trainer.train()
+    # Optimizer
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=config["training"]["learning_rate"],
+        weight_decay=config["training"]["weight_decay"],
+        betas=(0.9, 0.999),
+    )
 
+    total_steps = math.ceil(len(dataloader) / grad_accum)
+    warmup_steps = int(config["training"]["warmup_ratio"] * total_steps)
+
+    # Cosine LR scheduler with warmup
+    from torch.optim.lr_scheduler import LambdaLR
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = LambdaLR(optimizer, lr_lambda)
+
+    console.print(f"\n[bold green]🚀 Starting DPO alignment...[/bold green]")
+    console.print(f"  Total steps:    {total_steps}")
+    console.print(f"  Warmup steps:   {warmup_steps}")
+    console.print(f"  Batch size:     {batch_size} × {grad_accum} = {batch_size * grad_accum}")
+    console.print(f"  Beta:           {config['dpo']['beta']}\n")
+
+    output_dir = config["output"]["dir"]
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    beta = config["dpo"]["beta"]
+    log_steps = config["training"]["logging_steps"]
+    save_steps = config["training"].get("save_steps", 500)
+    global_step = 0
+    running_loss = 0.0
+    running_margin = 0.0
+    sample_idx = 0
+
+    scaler = torch.amp.GradScaler("cuda")
+    optimizer.zero_grad()
+
+    for batch_i, batch in enumerate(dataloader):
+        chosen_ids = batch["chosen_input_ids"].to(device)
+        chosen_mask = batch["chosen_attention_mask"].to(device)
+        chosen_labels = batch["chosen_labels"].to(device)
+        rejected_ids = batch["rejected_input_ids"].to(device)
+        rejected_mask = batch["rejected_attention_mask"].to(device)
+        rejected_labels = batch["rejected_labels"].to(device)
+
+        chosen_resp_mask = (chosen_labels != -100).long()
+        rejected_resp_mask = (rejected_labels != -100).long()
+
+        # Get reference log-probs for this batch
+        bs = chosen_ids.size(0)
+        ref_c = ref_chosen_logps_all[sample_idx:sample_idx + bs].to(device)
+        ref_r = ref_rejected_logps_all[sample_idx:sample_idx + bs].to(device)
+        sample_idx += bs
+
+        # Forward pass
+        with torch.amp.autocast("cuda", dtype=amp_dtype):
+            chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+            rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+
+            policy_chosen_logps = compute_log_probs(
+                chosen_out.logits.float(), chosen_ids, chosen_resp_mask
+            )
+            policy_rejected_logps = compute_log_probs(
+                rejected_out.logits.float(), rejected_ids, rejected_resp_mask
+            )
+
+            loss, reward_margin = dpo_loss(
+                policy_chosen_logps, policy_rejected_logps,
+                ref_c, ref_r, beta=beta
+            )
+            loss = loss / grad_accum
+
+        scaler.scale(loss).backward()
+        running_loss += loss.item()
+        running_margin += reward_margin
+
+        if (batch_i + 1) % grad_accum == 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in model.parameters() if p.requires_grad], 1.0
+            )
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
+            optimizer.zero_grad()
+            global_step += 1
+
+            if global_step % log_steps == 0:
+                avg_loss = running_loss / log_steps
+                avg_margin = running_margin / (log_steps * grad_accum)
+                lr = scheduler.get_last_lr()[0]
+                console.print(
+                    f"  Step {global_step:>5}/{total_steps} | "
+                    f"Loss: {avg_loss:.4f} | "
+                    f"Reward Margin: {avg_margin:+.3f} | "
+                    f"LR: {lr:.2e}"
+                )
+                running_loss = 0.0
+                running_margin = 0.0
+
+            if global_step % save_steps == 0:
+                ckpt_dir = f"{output_dir}/checkpoint-{global_step}"
+                model.save_pretrained(ckpt_dir)
+                tokenizer.save_pretrained(ckpt_dir)
+                console.print(f"  [dim]💾 Saved checkpoint at step {global_step}[/dim]")
+
+    # =========================================================================
+    # Step 7: Save final model
+    # =========================================================================
     console.print(f"\n[bold green]✓ DPO alignment complete![/bold green]")
-    console.print(f"  Total steps:  {train_result.global_step}")
-    console.print(f"  Final loss:   {train_result.training_loss:.4f}")
-    console.print(f"  Runtime:      {train_result.metrics.get('train_runtime', 0):.0f}s")
+    console.print(f"  Total steps:    {global_step}")
 
-    # =========================================================================
-    # Step 7: Save the aligned model
-    # =========================================================================
     console.print(f"\n[yellow]⏳ Saving aligned model to {output_dir}...[/yellow]")
-
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
