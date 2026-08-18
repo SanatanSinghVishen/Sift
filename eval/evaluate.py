@@ -18,17 +18,29 @@ Usage:
   python eval/evaluate.py --model checkpoints/dpo --samples 500
 """
 
+import sys
 import json
 import time
 import argparse
 from pathlib import Path
 from collections import Counter
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from rich.console import Console
 from rich.table import Table
 from rich.progress import track
 
-console = Console()
+console = Console(legacy_windows=False)
 
 
 def load_holdout_set(sft_path: str, holdout_size: int = 500, seed: int = 42) -> list:
