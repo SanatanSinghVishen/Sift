@@ -164,6 +164,26 @@ def main(config_path: str = None):
     # =========================================================================
     dataset = load_dpo_dataset(config["data"]["dataset_path"])
 
+    # ---- Format dataset for trl compatibility --------------------------------
+    # trl < 0.9.0 expects prompt/chosen/rejected as plain strings.
+    # Our dataset stores them as ChatML message lists. Apply chat_template
+    # to flatten them when needed.
+    if not _has_dpo_config:
+        console.print("[dim]ℹ Formatting dataset for trl < 0.9.0 (messages → strings)...[/dim]")
+
+        def _format_row(row):
+            # prompt: list of {role, content} → single string via chat template
+            prompt_str = tokenizer.apply_chat_template(
+                row["prompt"], tokenize=False, add_generation_prompt=True
+            )
+            # chosen/rejected: list with one assistant message → extract content
+            chosen_str = row["chosen"][0]["content"] if isinstance(row["chosen"], list) else row["chosen"]
+            rejected_str = row["rejected"][0]["content"] if isinstance(row["rejected"], list) else row["rejected"]
+            return {"prompt": prompt_str, "chosen": chosen_str, "rejected": rejected_str}
+
+        dataset = dataset.map(_format_row, num_proc=1)
+        console.print(f"[green]✓ Dataset formatted ({len(dataset):,} rows)[/green]")
+
     # =========================================================================
     # Step 5: Initialize DPOTrainer
     # =========================================================================
