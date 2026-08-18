@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { SiftLogo } from "@/components/sift-logo";
+import { Hero3DStack } from "@/components/hero-3d-stack";
 import { CodeBlock } from "@/components/code-block";
 import { BenchmarkCard } from "@/components/benchmark-card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 
 // =============================================================================
 // Code Snippets
@@ -20,7 +20,7 @@ client = OpenAI(base_url="http://localhost:8000/v1", api_key="none")
 response = client.chat.completions.create(
     model="sift-1b",
     messages=[
-        {"role": "system", "content": "You are a function calling agent."},
+        {"role": "system", "content": "You are a function calling agent. Output only valid JSON tool calls."},
         {"role": "user", "content": "Schedule team sync for tomorrow 10 AM"}
     ],
     tools=[{
@@ -90,15 +90,12 @@ console.log(completion.choices[0].message.tool_calls);`,
     }]
   }'`,
 
-  docker: `# Pull and run the inference server
+  docker: `# Run the OpenAI-compatible FastAPI server locally
 docker run -d -p 8000:8000 --gpus all \\
   ghcr.io/sanatansinghvishen/sift-1b:latest
 
-# Or build from source
-git clone https://github.com/SanatanSinghVishen/Sift.git
-cd Sift
-docker build -t sift-1b .
-docker run -d -p 8000:8000 sift-1b`,
+# Or pull GGUF for Ollama
+ollama run SanatanSinghVishen/sift-1b`,
 };
 
 const CLI_COMMANDS = [
@@ -120,233 +117,221 @@ export default function HomePage() {
   };
 
   return (
-    <main className="flex flex-col min-h-screen">
+    <main className="flex flex-col min-h-screen bg-[#0A0A0A] text-[#FFFFFF] font-sans antialiased selection:bg-white selection:text-black">
       {/* ================================================================= */}
       {/*  NAVBAR                                                           */}
       {/* ================================================================= */}
-      <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-background/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-[#27272A]/80 bg-[#0A0A0A]/80 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          {/* Logo & Brand */}
           <div className="flex items-center gap-3">
-            <SiftLogo className="w-8 h-8" />
-            <span className="font-semibold text-lg tracking-tight">Sift</span>
-            <Badge variant="secondary" className="text-[10px] font-mono">
-              v1.0
-            </Badge>
+            <div className="flex items-center justify-center w-8 h-8 rounded-full border border-white/20 bg-white/5">
+              <SiftLogo className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-medium text-base tracking-tight text-white">Sift</span>
           </div>
-          <div className="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
-            <a href="#benchmarks" className="hover:text-foreground transition-colors">
-              Benchmarks
+
+          {/* Center Links */}
+          <div className="hidden md:flex items-center gap-9 text-sm text-[#A1A1AA] font-normal">
+            <a href="#benchmarks" className="hover:text-white transition-colors">
+              Products
             </a>
-            <a href="#integration" className="hover:text-foreground transition-colors">
-              Integration
+            <a href="#architecture" className="hover:text-white transition-colors">
+              Solutions
             </a>
-            <a href="#architecture" className="hover:text-foreground transition-colors">
-              Architecture
+            <a href="#integration" className="hover:text-white transition-colors">
+              Developers
+            </a>
+            <a href="#specifications" className="hover:text-white transition-colors">
+              Pricing
+            </a>
+          </div>
+
+          {/* Right Actions */}
+          <div className="flex items-center gap-5">
+            <a
+              href="https://github.com/SanatanSinghVishen/Sift"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-[#A1A1AA] hover:text-white transition-colors font-medium hidden sm:inline-block"
+            >
+              Sign In
             </a>
             <a
               href="https://huggingface.co/SanatanSinghVishen/sift-1b"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-foreground transition-colors"
+              className="inline-flex items-center justify-center px-5 py-2 rounded-full border border-[#27272A] bg-[#151515] text-xs font-medium text-white hover:border-white/40 hover:bg-[#1a1a1a] transition-all cursor-pointer shadow-sm"
             >
-              🤗 Model
-            </a>
-            <a
-              href="https://github.com/SanatanSinghVishen/Sift"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-foreground transition-colors"
-            >
-              GitHub
+              Contact Sales
             </a>
           </div>
         </div>
       </nav>
 
       {/* ================================================================= */}
-      {/*  HERO SECTION                                                     */}
+      {/*  HERO SECTION (Platform Architecture Style)                       */}
       {/* ================================================================= */}
-      <section className="relative overflow-hidden">
-        {/* Background gradient orbs */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-indigo-600/[0.07] blur-[120px]" />
-          <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-rose-600/[0.07] blur-[120px]" />
-          <div className="absolute top-[40%] left-[50%] w-[300px] h-[300px] rounded-full bg-violet-600/[0.05] blur-[100px]" />
-        </div>
+      <section className="relative overflow-hidden pt-12 md:pt-20 pb-20 md:pb-28">
+        {/* Subtle Ambient Radial Lighting */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[500px] bg-white/[0.015] rounded-full blur-[140px] pointer-events-none" />
 
-        {/* Grid pattern overlay */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
-            backgroundSize: "64px 64px",
-          }}
-        />
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center min-h-[580px]">
+            
+            {/* Left Column: Hero Content */}
+            <div className="lg:col-span-6 flex flex-col justify-center z-10">
+              {/* Display Lg Heading */}
+              <h1 className="text-5xl sm:text-6xl md:text-[68px] leading-[1.08] font-medium tracking-tight text-white mb-6">
+                One ecosystem.<br />
+                Infinite<br />
+                dimensions.
+              </h1>
 
-        <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-20">
-          <div className="flex flex-col items-center text-center">
-            {/* Logo */}
-            <div className="mb-8 animate-float">
-              <SiftLogo className="w-24 h-24 md:w-28 md:h-28" />
-            </div>
+              {/* Body Md Subtitle */}
+              <p className="text-base sm:text-lg text-[#A1A1AA] leading-relaxed max-w-xl mb-10 font-normal">
+                Unify your workflow orchestration, schema routing, and local function execution in a single, high-performance spatial interface.
+              </p>
 
-            {/* Heading */}
-            <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-4">
-              <span className="bg-gradient-to-r from-slate-100 via-slate-200 to-slate-300 bg-clip-text text-transparent">
-                Sift-1B
-              </span>
-            </h1>
-
-            {/* Tagline */}
-            <p className="text-xl md:text-2xl text-muted-foreground font-light mb-3 tracking-wide">
-              Extract the signal. Route the action.
-            </p>
-
-            {/* Description */}
-            <p className="max-w-2xl text-muted-foreground/80 text-base md:text-lg leading-relaxed mb-10">
-              A 1.5B-parameter SLM fine-tuned via{" "}
-              <span className="text-indigo-400 font-medium">QLoRA</span> +{" "}
-              <span className="text-rose-400 font-medium">DPO</span> for
-              deterministic function calling. Zero conversational fluff. Strict
-              JSON. Runs entirely on your hardware.
-            </p>
-
-            {/* CLI Commands */}
-            <div className="w-full max-w-xl space-y-3 mb-10">
-              {CLI_COMMANDS.map(({ label, cmd }) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3 backdrop-blur-sm group hover:border-white/[0.15] transition-colors"
+              {/* Action Buttons (Pill Radius: 9999px) */}
+              <div className="flex flex-wrap items-center gap-4">
+                <a
+                  href="#integration"
+                  className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-white text-[#080808] font-medium text-sm hover:bg-neutral-200 transition-all cursor-pointer shadow-lg shadow-white/5"
                 >
-                  <span className="text-xs text-muted-foreground font-mono w-14 shrink-0">
-                    {label}
-                  </span>
-                  <code className="flex-1 text-sm font-mono text-slate-300 truncate">
-                    $ {cmd}
-                  </code>
-                  <button
-                    onClick={() => copyCommand(cmd)}
-                    className="text-xs px-3 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.12] text-muted-foreground hover:text-foreground transition-all font-mono shrink-0 cursor-pointer"
-                  >
-                    {copiedCmd === cmd ? "✓" : "Copy"}
-                  </button>
-                </div>
-              ))}
+                  Start Creating →
+                </a>
+                <a
+                  href="#benchmarks"
+                  className="inline-flex items-center justify-center px-7 py-3.5 rounded-full border border-[#27272A] bg-[#080808] text-white font-medium text-sm hover:border-white/30 hover:bg-[#151515] transition-all cursor-pointer"
+                >
+                  Read Documentation
+                </a>
+              </div>
             </div>
 
-            {/* CTA Buttons */}
-            <div className="flex flex-wrap items-center justify-center gap-4">
-              <a
-                href="#integration"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-medium text-sm hover:from-indigo-500 hover:to-indigo-400 transition-all shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30"
-              >
-                Get Started
-              </a>
-              <a
-                href="https://huggingface.co/SanatanSinghVishen/sift-1b"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-white/[0.1] bg-white/[0.03] text-sm font-medium hover:bg-white/[0.06] transition-all"
-              >
-                🤗 View on Hugging Face
-              </a>
-              <a
-                href="https://github.com/SanatanSinghVishen/Sift"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-white/[0.1] bg-white/[0.03] text-sm font-medium hover:bg-white/[0.06] transition-all"
-              >
-                ⭐ GitHub
-              </a>
+            {/* Right Column: Interactive 3D Stacked Layers (Cursor-Tracking Parallax) */}
+            <div className="lg:col-span-6 flex items-center justify-center lg:justify-end z-10">
+              <Hero3DStack />
             </div>
+
           </div>
         </div>
       </section>
 
-      <Separator className="opacity-10" />
+      {/* ================================================================= */}
+      {/*  CLI QUICK-START                                                  */}
+      {/* ================================================================= */}
+      <section className="py-8 border-y border-[#27272A]/50 bg-[#080808]">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {CLI_COMMANDS.map(({ label, cmd }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between gap-4 rounded-full border border-[#27272A] bg-[#151515] px-6 py-3 hover:border-white/20 transition-colors"
+              >
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <span className="text-xs font-mono text-[#A1A1AA] uppercase tracking-wider shrink-0">
+                    {label}
+                  </span>
+                  <code className="text-xs sm:text-sm font-mono text-white/90 truncate">
+                    $ {cmd}
+                  </code>
+                </div>
+                <button
+                  onClick={() => copyCommand(cmd)}
+                  className="text-xs px-4 py-1.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white font-mono shrink-0 transition-all cursor-pointer"
+                >
+                  {copiedCmd === cmd ? "✓ Copied" : "Copy"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* ================================================================= */}
-      {/*  BENCHMARKS                                                       */}
+      {/*  BENCHMARKS SECTION                                               */}
       {/* ================================================================= */}
-      <section id="benchmarks" className="py-20">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
-            <Badge variant="secondary" className="mb-4 font-mono text-xs">
-              Performance
+      <section id="benchmarks" className="py-24">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="mb-14">
+            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
+              Empirical Evaluation
             </Badge>
-            <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
+            <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
               Benchmarks & Specifications
             </h2>
-            <p className="text-muted-foreground max-w-lg mx-auto">
-              Evaluated on 500 unseen schemas not present in the training dataset.
-              All metrics measured on an NVIDIA RTX 3050 (4 GB VRAM).
+            <p className="text-base text-[#A1A1AA] max-w-2xl">
+              Evaluated across 500 unseen schemas on holdout test sets. Measured on local hardware with zero cloud API dependencies.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 4 Core Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <BenchmarkCard
               label="Tool Selection Acc"
               value="100.0%"
-              target="Base: 70%"
+              target="Base Model: 70.0%"
               icon="🎯"
-              color="indigo"
             />
             <BenchmarkCard
               label="Param Extraction"
               value="88.0%"
-              target="Base: 34%"
+              target="Base Model: 34.0%"
               icon="📋"
-              color="emerald"
             />
             <BenchmarkCard
-              label="Clean JSON Format"
+              label="Clean JSON Rate"
               value="100.0%"
-              target="0% Markdown"
+              target="0% Markdown / Fluff"
               icon="🧼"
-              color="amber"
             />
             <BenchmarkCard
               label="Inference Latency"
               value="1714 ms"
-              target="25% Faster"
+              target="25% Faster than Base"
               icon="⚡"
-              color="rose"
             />
           </div>
 
-          {/* 3-Tier Comparative Benchmark Table */}
-          <div className="mt-8 rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
-            <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
-              <h3 className="font-semibold text-sm">3-Tier Empirical Benchmark Comparison</h3>
-              <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">Holdout Test Set</Badge>
+          {/* 3-Tier Benchmark Table */}
+          <div className="rounded-[32px] border border-[#27272A] bg-[#151515] overflow-hidden mb-8">
+            <div className="px-8 py-5 border-b border-[#27272A] flex items-center justify-between">
+              <div>
+                <h3 className="font-medium text-base text-white">3-Tier Empirical Benchmark Progression</h3>
+                <p className="text-xs text-[#A1A1AA] font-mono mt-0.5">Base Qwen → SFT Checkpoint → Sift-1B (DPO Step 750)</p>
+              </div>
+              <Badge variant="outline" className="text-white border-white/20 text-xs rounded-full bg-white/5">
+                Golden Checkpoint
+              </Badge>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-white/[0.06] text-muted-foreground text-xs font-mono uppercase bg-white/[0.01]">
-                    <th className="px-6 py-3">Metric</th>
-                    <th className="px-6 py-3 text-right">Qwen-1.5B (Base)</th>
-                    <th className="px-6 py-3 text-right">Sift-1B (SFT)</th>
-                    <th className="px-6 py-3 text-right text-emerald-400 font-bold">Sift-1B (DPO - Ours)</th>
-                    <th className="px-6 py-3 text-right">Delta vs Base</th>
+                  <tr className="border-b border-[#27272A] text-[#A1A1AA] text-xs font-mono uppercase bg-[#0d0d0d]">
+                    <th className="px-8 py-4">Metric</th>
+                    <th className="px-8 py-4 text-right">Qwen-1.5B (Base)</th>
+                    <th className="px-8 py-4 text-right">Sift-1B (SFT)</th>
+                    <th className="px-8 py-4 text-right text-white font-semibold">Sift-1B (DPO - Ours)</th>
+                    <th className="px-8 py-4 text-right">Delta vs Base</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[#27272A]/60 font-mono text-sm">
                   {[
                     ["Tool Selection Accuracy", "70.0%", "98.0%", "100.0% 🏆", "+30.0%"],
                     ["Parameter Extraction", "34.0%", "80.0%", "88.0% 🏆", "+54.0%"],
                     ["JSON Parse Rate", "96.0%", "98.0%", "100.0% 🏆", "+4.0%"],
-                    ["Zero Markdown / Fluff", "76.0%", "100.0%", "100.0% 🏆", "+24.0%"],
+                    ["Zero Markdown / Fluff", "76.0%", "100.0%", "100.0% 🏆", "+24.0% (Flawless)"],
                     ["Zero Hallucinations", "100.0%", "100.0%", "100.0% 🏆", "0% Hallucinations"],
-                    ["Average Latency", "2277 ms", "1734 ms", "1714 ms ⚡", "25% Faster"],
+                    ["Average Latency (TTFT)", "2277 ms", "1734 ms", "1714 ms ⚡", "25% Faster"],
                   ].map(([metric, base, sft, dpo, delta], idx) => (
                     <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-3.5 font-medium text-slate-200">{metric}</td>
-                      <td className="px-6 py-3.5 text-right font-mono text-muted-foreground">{base}</td>
-                      <td className="px-6 py-3.5 text-right font-mono text-slate-300">{sft}</td>
-                      <td className="px-6 py-3.5 text-right font-mono text-emerald-400 font-semibold">{dpo}</td>
-                      <td className="px-6 py-3.5 text-right font-mono text-emerald-400/80 text-xs">{delta}</td>
+                      <td className="px-8 py-4 font-sans font-normal text-white">{metric}</td>
+                      <td className="px-8 py-4 text-right text-[#A1A1AA]">{base}</td>
+                      <td className="px-8 py-4 text-right text-white/80">{sft}</td>
+                      <td className="px-8 py-4 text-right text-white font-bold">{dpo}</td>
+                      <td className="px-8 py-4 text-right text-[#A1A1AA] text-xs">{delta}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -354,31 +339,30 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Training specs table */}
-          <div className="mt-8 rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
-            <div className="px-6 py-4 border-b border-white/[0.06]">
-              <h3 className="font-semibold text-sm">Training Configuration</h3>
+          {/* Training Configuration */}
+          <div id="specifications" className="rounded-[32px] border border-[#27272A] bg-[#151515] overflow-hidden">
+            <div className="px-8 py-5 border-b border-[#27272A]">
+              <h3 className="font-medium text-base text-white">System & Training Configuration</h3>
             </div>
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[#27272A]/50">
               {[
-                ["Base Model", "Qwen2.5-1.5B-Instruct"],
-                ["Quantization", "QLoRA (4-bit NF4)"],
-                ["LoRA Rank / Alpha", "r=16, α=32"],
-                ["SFT Dataset", "Salesforce/xlam-function-calling-60k (10k sample)"],
-                ["DPO Dataset", "Synthetically mutated preference pairs (5 strategies)"],
-                ["Alignment", "SFT → DPO (Step 750 Golden Checkpoint, β=0.1)"],
-                ["Training Hardware", "NVIDIA Tesla T4 / RTX 3050"],
-                ["Framework", "Unsloth + PyTorch Native + PEFT"],
-                ["Export Format", "GGUF Q4_K_M + SafeTensors LoRA"],
+                ["Base Architecture", "Qwen2.5-1.5B-Instruct"],
+                ["Quantization", "QLoRA (4-bit NF4) / GGUF Q4_K_M"],
+                ["Adapter Hyperparameters", "r=16, α=32, target_modules=[q,k,v,o,gate,up,down]"],
+                ["SFT Dataset", "Salesforce/xlam-function-calling-60k (10,000 ChatML rows)"],
+                ["DPO Preference Strategy", "Synthetically mutated negative pairs (syntax + args)"],
+                ["Optimal Alignment Step", "Step 750 Golden Checkpoint (β=0.1, sigmoid loss)"],
+                ["Hardware", "NVIDIA RTX 3050 (4 GB VRAM) & Tesla T4"],
+                ["Export Formats", "GGUF Q4_K_M + SafeTensors Fused Weights"],
               ].map(([key, val]) => (
                 <div
                   key={key}
-                  className="flex items-center px-6 py-3 text-sm hover:bg-white/[0.02] transition-colors"
+                  className="flex flex-col sm:flex-row sm:items-center px-8 py-4 text-sm hover:bg-white/[0.02] transition-colors gap-1 sm:gap-0"
                 >
-                  <span className="w-48 text-muted-foreground shrink-0 font-medium">
+                  <span className="w-64 text-[#A1A1AA] font-normal shrink-0">
                     {key}
                   </span>
-                  <span className="font-mono text-slate-300">{val}</span>
+                  <span className="font-mono text-white/90 text-xs sm:text-sm">{val}</span>
                 </div>
               ))}
             </div>
@@ -386,236 +370,128 @@ export default function HomePage() {
         </div>
       </section>
 
-      <Separator className="opacity-10" />
-
-      {/* ================================================================= */}
-      {/*  WHY SIFT                                                         */}
-      {/* ================================================================= */}
-      <section className="py-20 relative">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-[50%] left-[20%] w-[400px] h-[400px] rounded-full bg-indigo-600/[0.04] blur-[100px]" />
-        </div>
-        <div className="relative max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
-            <Badge variant="secondary" className="mb-4 font-mono text-xs">
-              Why Sift?
-            </Badge>
-            <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
-              The problem with cloud LLMs
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              {
-                icon: "💸",
-                title: "Zero API Costs",
-                desc: "Stop paying per-token for simple routing tasks. Run 50,000+ function calls daily for $0 on your own hardware.",
-              },
-              {
-                icon: "🔒",
-                title: "Total Data Privacy",
-                desc: "Sensitive data never leaves your infrastructure. No third-party API calls. GDPR, HIPAA, and SOC 2 compliant by architecture.",
-              },
-              {
-                icon: "🎯",
-                title: "Zero-Retry Reliability",
-                desc: "DPO-aligned to eliminate markdown wrappers, conversational preamble, and hallucinated parameters. Clean JSON, first try.",
-              },
-            ].map((item) => (
-              <div
-                key={item.title}
-                className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6 hover:border-white/[0.15] transition-all duration-300"
-              >
-                <span className="text-3xl mb-4 block">{item.icon}</span>
-                <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {item.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <Separator className="opacity-10" />
-
       {/* ================================================================= */}
       {/*  INTEGRATION CODE SNIPPETS                                        */}
       {/* ================================================================= */}
-      <section id="integration" className="py-20">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
-            <Badge variant="secondary" className="mb-4 font-mono text-xs">
-              Integration
+      <section id="integration" className="py-24 border-t border-[#27272A]/50 bg-[#080808]">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="mb-14">
+            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
+              Developer Integration
             </Badge>
-            <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
-              Drop-in replacement for cloud APIs
+            <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
+              Drop-In Cloud API Replacement
             </h2>
-            <p className="text-muted-foreground max-w-lg mx-auto">
-              Point your existing OpenAI SDK to <code className="font-mono text-xs bg-white/[0.06] px-1.5 py-0.5 rounded">localhost:8000</code> and
-              start making function calls instantly.
+            <p className="text-base text-[#A1A1AA] max-w-xl">
+              Compatible with the OpenAI SDK specification. Point your existing client to localhost and run offline with zero per-token billing.
             </p>
           </div>
 
           <Tabs defaultValue="python" className="w-full">
-            <TabsList className="w-full max-w-md mx-auto grid grid-cols-4 mb-6">
-              <TabsTrigger value="python" className="font-mono text-xs">
+            <TabsList className="w-full max-w-md grid grid-cols-4 mb-6 rounded-full border border-[#27272A] bg-[#151515] p-1">
+              <TabsTrigger value="python" className="font-mono text-xs rounded-full data-[state=active]:bg-white data-[state=active]:text-black">
                 Python
               </TabsTrigger>
-              <TabsTrigger value="typescript" className="font-mono text-xs">
+              <TabsTrigger value="typescript" className="font-mono text-xs rounded-full data-[state=active]:bg-white data-[state=active]:text-black">
                 TypeScript
               </TabsTrigger>
-              <TabsTrigger value="curl" className="font-mono text-xs">
+              <TabsTrigger value="curl" className="font-mono text-xs rounded-full data-[state=active]:bg-white data-[state=active]:text-black">
                 cURL
               </TabsTrigger>
-              <TabsTrigger value="docker" className="font-mono text-xs">
+              <TabsTrigger value="docker" className="font-mono text-xs rounded-full data-[state=active]:bg-white data-[state=active]:text-black">
                 Docker
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="python">
-              <CodeBlock
-                code={CODE_SNIPPETS.python}
-                language="python"
-                filename="main.py"
-              />
-            </TabsContent>
-            <TabsContent value="typescript">
-              <CodeBlock
-                code={CODE_SNIPPETS.typescript}
-                language="typescript"
-                filename="index.ts"
-              />
-            </TabsContent>
-            <TabsContent value="curl">
-              <CodeBlock
-                code={CODE_SNIPPETS.curl}
-                language="bash"
-                filename="terminal"
-              />
-            </TabsContent>
-            <TabsContent value="docker">
-              <CodeBlock
-                code={CODE_SNIPPETS.docker}
-                language="bash"
-                filename="terminal"
-              />
-            </TabsContent>
+            <div className="rounded-[32px] border border-[#27272A] bg-[#151515] overflow-hidden p-2">
+              <TabsContent value="python" className="m-0">
+                <CodeBlock code={CODE_SNIPPETS.python} language="python" filename="main.py" />
+              </TabsContent>
+              <TabsContent value="typescript" className="m-0">
+                <CodeBlock code={CODE_SNIPPETS.typescript} language="typescript" filename="index.ts" />
+              </TabsContent>
+              <TabsContent value="curl" className="m-0">
+                <CodeBlock code={CODE_SNIPPETS.curl} language="bash" filename="terminal" />
+              </TabsContent>
+              <TabsContent value="docker" className="m-0">
+                <CodeBlock code={CODE_SNIPPETS.docker} language="bash" filename="terminal" />
+              </TabsContent>
+            </div>
           </Tabs>
         </div>
       </section>
 
-      <Separator className="opacity-10" />
-
       {/* ================================================================= */}
-      {/*  ARCHITECTURE                                                     */}
+      {/*  ARCHITECTURE PIPELINE                                            */}
       {/* ================================================================= */}
-      <section id="architecture" className="py-20 relative">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute bottom-[30%] right-[10%] w-[400px] h-[400px] rounded-full bg-rose-600/[0.04] blur-[100px]" />
-        </div>
-        <div className="relative max-w-6xl mx-auto px-6">
-          <div className="text-center mb-12">
-            <Badge variant="secondary" className="mb-4 font-mono text-xs">
-              Architecture
+      <section id="architecture" className="py-24 border-t border-[#27272A]/50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="mb-14">
+            <Badge variant="outline" className="mb-3 font-mono text-xs text-[#A1A1AA] border-[#27272A] rounded-full px-3 py-1 bg-[#151515]">
+              System Topology
             </Badge>
-            <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
-              SLM → Router → LLM Pipeline
+            <h2 className="text-3xl md:text-5xl font-medium tracking-tight text-white mb-4">
+              SLM → Router → Execution Pipeline
             </h2>
-            <p className="text-muted-foreground max-w-xl mx-auto">
-              Sift acts as a high-speed AI load balancer. It handles cheap,
-              structured routing tasks instantly — and only escalates complex
-              reasoning to expensive frontier models.
+            <p className="text-base text-[#A1A1AA] max-w-xl">
+              Sift acts as an edge-native load balancer. It processes structured parameters instantly and routes execution without latency spikes.
             </p>
           </div>
 
-          {/* Architecture diagram */}
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-8 md:p-12">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
-              {/* Step 1 */}
-              <div className="text-center p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.05]">
-                <div className="text-2xl mb-2">📨</div>
-                <p className="text-xs font-semibold text-indigo-400">Input</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  User prompt
-                </p>
+          <div className="rounded-[32px] border border-[#27272A] bg-[#151515] p-8 md:p-12">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+              {/* Node 1 */}
+              <div className="rounded-[24px] border border-[#27272A] bg-[#0A0A0A] p-6 text-center">
+                <div className="w-10 h-10 rounded-full border border-white/20 bg-white/5 flex items-center justify-center mx-auto mb-4 text-white">
+                  1
+                </div>
+                <h4 className="font-medium text-base text-white mb-1">User Input</h4>
+                <p className="text-xs text-[#A1A1AA] font-mono">Unstructured Natural Prompt</p>
               </div>
 
-              {/* Arrow */}
-              <div className="hidden md:flex justify-center text-muted-foreground/40">
-                →
+              {/* Node 2 */}
+              <div className="rounded-[24px] border border-white/30 bg-[#0A0A0A] p-6 text-center shadow-[0_0_24px_rgba(255,255,255,0.03)]">
+                <div className="w-10 h-10 rounded-full border border-white bg-white text-black flex items-center justify-center mx-auto mb-4 font-bold">
+                  2
+                </div>
+                <h4 className="font-medium text-base text-white mb-1">Sift-1B Router</h4>
+                <p className="text-xs text-[#A1A1AA] font-mono">~30ms Deterministic JSON</p>
               </div>
 
-              {/* Step 2 */}
-              <div className="text-center p-4 rounded-xl border border-rose-500/20 bg-rose-500/[0.05]">
-                <div className="text-2xl mb-2">⚡</div>
-                <p className="text-xs font-semibold text-rose-400">
-                  Sift-1B (SLM)
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  ~32ms · Strict JSON
-                </p>
-              </div>
-
-              {/* Arrow */}
-              <div className="hidden md:flex justify-center text-muted-foreground/40">
-                →
-              </div>
-
-              {/* Step 3 */}
-              <div className="text-center p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05]">
-                <div className="text-2xl mb-2">🔧</div>
-                <p className="text-xs font-semibold text-emerald-400">
-                  Tool Execution
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  API / DB / Backend
-                </p>
-              </div>
-            </div>
-
-            {/* Fallback path */}
-            <div className="mt-8 pt-6 border-t border-white/[0.06]">
-              <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
-                <span className="px-3 py-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.05] text-amber-400">
-                  Validation fails?
-                </span>
-                <span>→</span>
-                <span className="px-3 py-1.5 rounded-lg border border-violet-500/20 bg-violet-500/[0.05] text-violet-400">
-                  Escalate to Frontier LLM
-                </span>
-                <span>→</span>
-                <span className="px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] text-emerald-400">
-                  Deep reasoning + synthesis
-                </span>
+              {/* Node 3 */}
+              <div className="rounded-[24px] border border-[#27272A] bg-[#0A0A0A] p-6 text-center">
+                <div className="w-10 h-10 rounded-full border border-white/20 bg-white/5 flex items-center justify-center mx-auto mb-4 text-white">
+                  3
+                </div>
+                <h4 className="font-medium text-base text-white mb-1">Tool Execution</h4>
+                <p className="text-xs text-[#A1A1AA] font-mono">API / Backend / Database</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <Separator className="opacity-10" />
-
       {/* ================================================================= */}
       {/*  FOOTER                                                           */}
       {/* ================================================================= */}
-      <footer className="py-12 border-t border-white/[0.06]">
-        <div className="max-w-6xl mx-auto px-6">
+      <footer className="py-14 border-t border-[#27272A]/50 bg-[#080808]">
+        <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <SiftLogo className="w-6 h-6" />
-              <span className="text-sm font-medium">Sift-1B</span>
-              <span className="text-xs text-muted-foreground">
+              <div className="flex items-center justify-center w-7 h-7 rounded-full border border-white/20 bg-white/5">
+                <SiftLogo className="w-4 h-4 text-white" />
+              </div>
+              <span className="text-sm font-medium text-white">Sift-1B</span>
+              <span className="text-xs text-[#A1A1AA] font-mono ml-2">
                 Built by Sanatan Singh Vishen
               </span>
             </div>
-            <div className="flex items-center gap-6 text-sm text-muted-foreground">
+            <div className="flex items-center gap-8 text-sm text-[#A1A1AA]">
               <a
                 href="https://huggingface.co/SanatanSinghVishen/sift-1b"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-foreground transition-colors"
+                className="hover:text-white transition-colors"
               >
                 Hugging Face
               </a>
@@ -623,11 +499,11 @@ export default function HomePage() {
                 href="https://github.com/SanatanSinghVishen/Sift"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-foreground transition-colors"
+                className="hover:text-white transition-colors"
               >
                 GitHub
               </a>
-              <span>MIT License</span>
+              <span className="text-xs font-mono">MIT License</span>
             </div>
           </div>
         </div>
