@@ -289,6 +289,13 @@ def main(config_path: str = None):
     output_dir = config["output"]["dir"]
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     ref_cache_path = Path(output_dir) / "ref_logprobs.pt"
+    drive_backup_dir = Path("/content/drive/MyDrive/sift_dpo_backup")
+
+    # Check local cache first, then Google Drive backup
+    if not ref_cache_path.exists() and (drive_backup_dir / "ref_logprobs.pt").exists():
+        import shutil
+        console.print("[yellow]📂 Found cached reference log-probs in Google Drive! Restoring...[/yellow]")
+        shutil.copy(drive_backup_dir / "ref_logprobs.pt", ref_cache_path)
 
     if ref_cache_path.exists():
         console.print(f"[green]✓ Loading cached reference log-probs from {ref_cache_path}[/green]")
@@ -346,6 +353,13 @@ def main(config_path: str = None):
         torch.save({"chosen": ref_chosen_logps_all, "rejected": ref_rejected_logps_all}, ref_cache_path)
         console.print(f"[green]✓ Reference log-probs cached to {ref_cache_path}[/green]")
 
+        # Mirror to Drive if mounted
+        if Path("/content/drive/MyDrive").exists():
+            drive_backup_dir.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy(ref_cache_path, drive_backup_dir / "ref_logprobs.pt")
+            console.print(f"[dim]  Mirrored ref_logprobs.pt to Google Drive backup[/dim]")
+
     # Attach cached reference log-probs directly to dataset
     tokenized = tokenized.add_column("ref_chosen_logp", ref_chosen_logps_all.tolist())
     tokenized = tokenized.add_column("ref_rejected_logp", ref_rejected_logps_all.tolist())
@@ -388,12 +402,27 @@ def main(config_path: str = None):
     scheduler = LambdaLR(optimizer, lr_lambda)
     scaler = torch.amp.GradScaler("cuda")
 
-    # Check for existing checkpoints to auto-resume
+    # Check for existing checkpoints to auto-resume (local or Google Drive)
     start_step = 0
     existing_ckpts = sorted(
         [d for d in Path(output_dir).glob("checkpoint-*") if d.is_dir()],
         key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
     )
+
+    # If no local checkpoint, check Drive backup
+    if not existing_ckpts and drive_backup_dir.exists():
+        drive_ckpts = sorted(
+            [d for d in drive_backup_dir.glob("checkpoint-*") if d.is_dir()],
+            key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
+        )
+        if drive_ckpts:
+            import shutil
+            latest_drive_ckpt = drive_ckpts[-1]
+            console.print(f"[yellow]📦 Found {latest_drive_ckpt.name} in Google Drive! Restoring...[/yellow]")
+            local_restore = Path(output_dir) / latest_drive_ckpt.name
+            shutil.copytree(latest_drive_ckpt, local_restore, dirs_exist_ok=True)
+            existing_ckpts = [local_restore]
+
     if existing_ckpts:
         latest_ckpt = existing_ckpts[-1]
         state_file = latest_ckpt / "training_state.pt"
@@ -500,6 +529,13 @@ def main(config_path: str = None):
                 )
                 console.print(f"  [dim]💾 Saved checkpoint & state at step {global_step}[/dim]")
 
+                # Mirror to Google Drive if available
+                if Path("/content/drive/MyDrive").exists():
+                    drive_ckpt = drive_backup_dir / f"checkpoint-{global_step}"
+                    import shutil
+                    shutil.copytree(ckpt_dir, drive_ckpt, dirs_exist_ok=True)
+                    console.print(f"  [dim]☁️ Mirrored checkpoint-{global_step} to Google Drive[/dim]")
+
     # =========================================================================
     # Step 7: Save final model
     # =========================================================================
@@ -510,11 +546,17 @@ def main(config_path: str = None):
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
+    if Path("/content/drive/MyDrive").exists():
+        import shutil
+        drive_final = drive_backup_dir / "final"
+        shutil.copytree(output_dir, drive_final, dirs_exist_ok=True)
+        console.print(f"[dim]☁️ Mirrored final model to Google Drive: {drive_final}[/dim]")
+
     console.print(f"[bold green]✓ Model saved to {output_dir}[/bold green]")
     console.print(f"\n[bold]Next steps:[/bold]")
     console.print(f"  1. Evaluate:  python eval/evaluate.py")
     console.print(f"  2. Export:    python export/export_gguf.py")
-    console.print(f"  3. Deploy:    python export/push_to_hub.py\n")
+    console.print(f"  3. Deploy:    python export/push_dpo.py\n")
 
 
 if __name__ == "__main__":
