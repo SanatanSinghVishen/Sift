@@ -96,12 +96,19 @@ def main(config_path: str = None):
     from trl import DPOTrainer
     from transformers import Trainer, TrainingArguments
 
-    # Fix: DPOTrainer in older TRL overrides get_batch_samples with an old 2-argument
-    # signature (epoch_iterator, num_batches), but modern transformers Trainer._run_epoch
-    # passes 3 arguments (epoch_iterator, num_batches, device).
-    # Re-binding to Trainer.get_batch_samples fixes this universally.
-    if hasattr(Trainer, "get_batch_samples"):
-        DPOTrainer.get_batch_samples = Trainer.get_batch_samples
+    # Universal fix for Trainer._run_epoch calling get_batch_samples with varying arguments
+    def safe_get_batch_samples(self, epoch_iterator, num_batches, device=None):
+        batch_samples = []
+        num_items_in_batch = None
+        for _ in range(num_batches):
+            try:
+                batch_samples.append(next(epoch_iterator))
+            except StopIteration:
+                break
+        return batch_samples, num_items_in_batch
+
+    DPOTrainer.get_batch_samples = safe_get_batch_samples
+    Trainer.get_batch_samples = safe_get_batch_samples
 
     # DPOConfig exists in trl >= 0.9.0; older versions use TrainingArguments
     try:
@@ -300,9 +307,8 @@ def main(config_path: str = None):
             max_prompt_length=config["model"]["max_seq_length"] // 2,
         )
 
-    # Bind Trainer.get_batch_samples directly to the trainer instance to ensure compatibility
-    if hasattr(Trainer, "get_batch_samples"):
-        dpo_trainer.get_batch_samples = Trainer.get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
+    # Bind safe_get_batch_samples directly to the trainer instance to ensure compatibility
+    dpo_trainer.get_batch_samples = safe_get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
 
     # =========================================================================
     # Step 6: Train! (With auto-resume support)
