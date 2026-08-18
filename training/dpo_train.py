@@ -154,38 +154,66 @@ def main(config_path: str = None):
     import torch
     from torch.nn.utils.rnn import pad_sequence
     import trl.trainer.utils as trl_utils
+    import trl.trainer.dpo_trainer as dpo_module
 
     class SafeDPODataCollatorWithPadding:
-        def __init__(self, pad_token_id=0, label_pad_token_id=-100, is_encoder_decoder=False):
-            self.pad_token_id = pad_token_id if pad_token_id is not None else 0
-            self.label_pad_token_id = label_pad_token_id
+        def __init__(self, pad_token_id=151643, label_pad_token_id=-100, is_encoder_decoder=False):
+            self.pad_token_id = pad_token_id if pad_token_id is not None else 151643
+            self.label_pad_token_id = label_pad_token_id if label_pad_token_id is not None else -100
             self.is_encoder_decoder = is_encoder_decoder
 
         def __call__(self, features):
-            batch = {}
+            padded_batch = {}
             for k in features[0].keys():
                 if k.endswith("_input_ids") or k.endswith("_attention_mask") or k.endswith("_labels"):
-                    valid_tensors = []
+                    to_pad = []
                     for ex in features:
                         val = ex.get(k)
                         if val is None:
                             if k.endswith("_attention_mask"):
-                                matching_ids_k = k.replace("_attention_mask", "_input_ids")
-                                ids_len = len(ex.get(matching_ids_k, []))
+                                match_k = k.replace("_attention_mask", "_input_ids")
+                                ids_len = len(ex.get(match_k) or [])
                                 val = [1] * ids_len
+                            elif k.endswith("_labels"):
+                                match_k = k.replace("_labels", "_input_ids")
+                                ids_len = len(ex.get(match_k) or [])
+                                val = [self.label_pad_token_id] * ids_len
                             else:
-                                val = []
-                        valid_tensors.append(torch.tensor(val, dtype=torch.long))
+                                val = [self.pad_token_id]
+                        
+                        if isinstance(val, torch.Tensor):
+                            val = val.tolist()
+                        elif not isinstance(val, list):
+                            val = [val] if val is not None else [0]
+                        
+                        clean_val = [x if x is not None else (0 if "attention_mask" in k else self.pad_token_id) for x in val]
+                        if len(clean_val) == 0:
+                            clean_val = [0 if "attention_mask" in k else self.pad_token_id]
 
-                    pad_val = self.label_pad_token_id if k.endswith("_labels") else (
-                        0 if k.endswith("_attention_mask") else self.pad_token_id
-                    )
-                    batch[k] = pad_sequence(valid_tensors, batch_first=True, padding_value=pad_val)
+                        if "prompt" in k:
+                            to_pad.append(torch.tensor(clean_val[::-1], dtype=torch.long))
+                        else:
+                            to_pad.append(torch.tensor(clean_val, dtype=torch.long))
+
+                    if k.endswith("_input_ids"):
+                        pad_val = self.pad_token_id
+                    elif k.endswith("_labels"):
+                        pad_val = self.label_pad_token_id
+                    elif k.endswith("_attention_mask"):
+                        pad_val = 0
+                    else:
+                        pad_val = self.pad_token_id
+
+                    padded_batch[k] = pad_sequence(to_pad, batch_first=True, padding_value=pad_val)
+                    if "prompt" in k:
+                        padded_batch[k] = padded_batch[k].flip(dims=[1])
                 elif isinstance(features[0][k], (int, float)):
-                    batch[k] = torch.tensor([ex[k] for ex in features])
-            return batch
+                    padded_batch[k] = torch.tensor([ex[k] for ex in features])
+            return padded_batch
 
     trl_utils.DPODataCollatorWithPadding = SafeDPODataCollatorWithPadding
+    dpo_module.DPODataCollatorWithPadding = SafeDPODataCollatorWithPadding
+    collator = SafeDPODataCollatorWithPadding(pad_token_id=tokenizer.pad_token_id)
 
     console.print("[green]✓ SFT model loaded[/green]")
 
@@ -304,6 +332,7 @@ def main(config_path: str = None):
             args=training_args,
             train_dataset=dataset,
             processing_class=tokenizer,
+            data_collator=collator,
         )
     else:
         # trl < 0.9.0: DPO-specific args go into DPOTrainer constructor
@@ -346,13 +375,15 @@ def main(config_path: str = None):
             args=training_args,
             train_dataset=dataset,
             tokenizer=tokenizer,
+            data_collator=collator,
             beta=config["dpo"]["beta"],
             loss_type=config["dpo"]["loss_type"],
             max_length=config["model"]["max_seq_length"],
             max_prompt_length=config["model"]["max_seq_length"] // 2,
         )
 
-    # Bind safe_get_batch_samples directly to the trainer instance to ensure compatibility
+    # Bind safe collator and safe_get_batch_samples directly to the trainer instance
+    dpo_trainer.data_collator = collator
     dpo_trainer.get_batch_samples = safe_get_batch_samples.__get__(dpo_trainer, type(dpo_trainer))
 
     # =========================================================================
