@@ -243,7 +243,7 @@ def main(config_path: str = None):
     console.print(f"[green]✓ Tokenized {len(tokenized):,} pairs[/green]")
 
     # =========================================================================
-    # Step 4: Collator & DataLoader
+    # Step 4: Collator & Reference DataLoader
     # =========================================================================
     pad_id = tokenizer.pad_token_id
 
@@ -255,31 +255,18 @@ def main(config_path: str = None):
             seqs = [torch.tensor(ex[key], dtype=torch.long) for ex in batch]
             pad_val = -100 if "labels" in key else (0 if "mask" in key else pad_id)
             max_seq_len = max(s.size(0) for s in seqs)
-            padded = []
-            for s in seqs:
-                padding = torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long)
-                padded.append(torch.cat([padding, s]) if "chosen" in key or "rejected" in key else torch.cat([s, padding]))
-                # Left-pad for causal LM
-            result[key] = torch.stack([torch.cat([torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long), s]) for s in seqs])
+            result[key] = torch.stack([
+                torch.cat([torch.full((max_seq_len - s.size(0),), pad_val, dtype=torch.long), s])
+                for s in seqs
+            ])
+        if "ref_chosen_logp" in batch[0]:
+            result["ref_chosen_logp"] = torch.tensor([ex["ref_chosen_logp"] for ex in batch], dtype=torch.float32)
+            result["ref_rejected_logp"] = torch.tensor([ex["ref_rejected_logp"] for ex in batch], dtype=torch.float32)
         return result
 
-    batch_size = config["training"]["per_device_train_batch_size"]
-    grad_accum = config["training"]["gradient_accumulation_steps"]
-
-    dataloader = DataLoader(
-        tokenized,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=0,
-        pin_memory=True,
-    )
-
     # =========================================================================
-    # Step 5: Compute reference log-probs (frozen model)
+    # Step 5: Compute reference log-probs (frozen model) — cached to disk
     # =========================================================================
-    console.print("[yellow]⏳ Computing reference log-probabilities (frozen pass)...[/yellow]")
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Use fp16 or bf16 based on hardware
@@ -292,47 +279,87 @@ def main(config_path: str = None):
     amp_dtype = torch.bfloat16 if _use_bf16 else torch.float16
     console.print(f"[dim]ℹ Precision: {'bf16' if _use_bf16 else 'fp16'}[/dim]")
 
-    model.eval()
-    ref_chosen_logps_all = []
-    ref_rejected_logps_all = []
+    output_dir = config["output"]["dir"]
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    ref_cache_path = Path(output_dir) / "ref_logprobs.pt"
 
-    with torch.no_grad():
-        for i, batch in enumerate(dataloader):
-            chosen_ids = batch["chosen_input_ids"].to(device)
-            chosen_mask = batch["chosen_attention_mask"].to(device)
-            chosen_labels = batch["chosen_labels"].to(device)
-            rejected_ids = batch["rejected_input_ids"].to(device)
-            rejected_mask = batch["rejected_attention_mask"].to(device)
-            rejected_labels = batch["rejected_labels"].to(device)
+    if ref_cache_path.exists():
+        console.print(f"[green]✓ Loading cached reference log-probs from {ref_cache_path}[/green]")
+        ref_cache = torch.load(ref_cache_path, weights_only=True)
+        ref_chosen_logps_all = ref_cache["chosen"]
+        ref_rejected_logps_all = ref_cache["rejected"]
+        console.print(f"[green]✓ Loaded {len(ref_chosen_logps_all):,} cached reference pairs[/green]")
+    else:
+        console.print("[yellow]⏳ Computing reference log-probabilities (frozen pass)...[/yellow]")
+        console.print("[dim]  (One-time pass — cached to disk so you never need to recompute)[/dim]")
 
-            # Create response mask (where labels != -100)
-            chosen_resp_mask = (chosen_labels != -100).long()
-            rejected_resp_mask = (rejected_labels != -100).long()
+        # Use larger batch for reference pass (no gradients = less memory, fast ~5-7 min)
+        ref_dataloader = DataLoader(
+            tokenized,
+            batch_size=16,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=0,
+            pin_memory=True,
+        )
 
-            with torch.amp.autocast("cuda", dtype=amp_dtype):
-                chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
-                rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+        model.eval()
+        ref_chosen_logps_all = []
+        ref_rejected_logps_all = []
 
-            ref_chosen_logps_all.append(
-                compute_log_probs(chosen_out.logits.float(), chosen_ids, chosen_resp_mask).cpu()
-            )
-            ref_rejected_logps_all.append(
-                compute_log_probs(rejected_out.logits.float(), rejected_ids, rejected_resp_mask).cpu()
-            )
+        with torch.no_grad():
+            for i, batch in enumerate(ref_dataloader):
+                chosen_ids = batch["chosen_input_ids"].to(device)
+                chosen_mask = batch["chosen_attention_mask"].to(device)
+                chosen_labels = batch["chosen_labels"].to(device)
+                rejected_ids = batch["rejected_input_ids"].to(device)
+                rejected_mask = batch["rejected_attention_mask"].to(device)
+                rejected_labels = batch["rejected_labels"].to(device)
 
-            if (i + 1) % 500 == 0:
-                console.print(f"[dim]  Reference pass: {i + 1}/{len(dataloader)} batches[/dim]")
+                chosen_resp_mask = (chosen_labels != -100).long()
+                rejected_resp_mask = (rejected_labels != -100).long()
 
-    ref_chosen_logps_all = torch.cat(ref_chosen_logps_all)
-    ref_rejected_logps_all = torch.cat(ref_rejected_logps_all)
-    console.print(f"[green]✓ Reference log-probs computed ({len(ref_chosen_logps_all):,} pairs)[/green]")
+                with torch.amp.autocast("cuda", dtype=amp_dtype):
+                    chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
+                    rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
+
+                ref_chosen_logps_all.append(
+                    compute_log_probs(chosen_out.logits.float(), chosen_ids, chosen_resp_mask).cpu()
+                )
+                ref_rejected_logps_all.append(
+                    compute_log_probs(rejected_out.logits.float(), rejected_ids, rejected_resp_mask).cpu()
+                )
+
+                if (i + 1) % 50 == 0 or (i + 1) == len(ref_dataloader):
+                    console.print(f"[dim]  Reference pass: {i + 1}/{len(ref_dataloader)} batches ({100 * (i + 1) / len(ref_dataloader):.1f}%)[/dim]")
+
+        ref_chosen_logps_all = torch.cat(ref_chosen_logps_all)
+        ref_rejected_logps_all = torch.cat(ref_rejected_logps_all)
+
+        torch.save({"chosen": ref_chosen_logps_all, "rejected": ref_rejected_logps_all}, ref_cache_path)
+        console.print(f"[green]✓ Reference log-probs cached to {ref_cache_path}[/green]")
+
+    # Attach cached reference log-probs directly to dataset
+    tokenized = tokenized.add_column("ref_chosen_logp", ref_chosen_logps_all.tolist())
+    tokenized = tokenized.add_column("ref_rejected_logp", ref_rejected_logps_all.tolist())
 
     # =========================================================================
     # Step 6: DPO Training Loop
     # =========================================================================
+    batch_size = config["training"]["per_device_train_batch_size"]
+    grad_accum = config["training"]["gradient_accumulation_steps"]
+
+    train_dataloader = DataLoader(
+        tokenized,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=0,
+        pin_memory=True,
+    )
+
     model.train()
 
-    # Optimizer
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=config["training"]["learning_rate"],
@@ -340,10 +367,9 @@ def main(config_path: str = None):
         betas=(0.9, 0.999),
     )
 
-    total_steps = math.ceil(len(dataloader) / grad_accum)
+    total_steps = math.ceil(len(train_dataloader) / grad_accum)
     warmup_steps = int(config["training"]["warmup_ratio"] * total_steps)
 
-    # Cosine LR scheduler with warmup
     from torch.optim.lr_scheduler import LambdaLR
 
     def lr_lambda(step):
@@ -353,6 +379,25 @@ def main(config_path: str = None):
         return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     scheduler = LambdaLR(optimizer, lr_lambda)
+    scaler = torch.amp.GradScaler("cuda")
+
+    # Check for existing checkpoints to auto-resume
+    start_step = 0
+    existing_ckpts = sorted(
+        [d for d in Path(output_dir).glob("checkpoint-*") if d.is_dir()],
+        key=lambda p: int(p.name.split("-")[-1]) if p.name.split("-")[-1].isdigit() else 0
+    )
+    if existing_ckpts:
+        latest_ckpt = existing_ckpts[-1]
+        state_file = latest_ckpt / "training_state.pt"
+        if state_file.exists():
+            console.print(f"[yellow]📦 Auto-resuming from {latest_ckpt}...[/yellow]")
+            state = torch.load(state_file, weights_only=True)
+            start_step = state["step"]
+            optimizer.load_state_dict(state["optimizer"])
+            scheduler.load_state_dict(state["scheduler"])
+            scaler.load_state_dict(state["scaler"])
+            console.print(f"[green]✓ Resumed at step {start_step}/{total_steps}[/green]")
 
     console.print(f"\n[bold green]🚀 Starting DPO alignment...[/bold green]")
     console.print(f"  Total steps:    {total_steps}")
@@ -360,21 +405,20 @@ def main(config_path: str = None):
     console.print(f"  Batch size:     {batch_size} × {grad_accum} = {batch_size * grad_accum}")
     console.print(f"  Beta:           {config['dpo']['beta']}\n")
 
-    output_dir = config["output"]["dir"]
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
     beta = config["dpo"]["beta"]
     log_steps = config["training"]["logging_steps"]
     save_steps = config["training"].get("save_steps", 500)
-    global_step = 0
+    global_step = start_step
     running_loss = 0.0
     running_margin = 0.0
-    sample_idx = 0
 
-    scaler = torch.amp.GradScaler("cuda")
     optimizer.zero_grad()
 
-    for batch_i, batch in enumerate(dataloader):
+    for batch_i, batch in enumerate(train_dataloader):
+        # Skip steps if resuming
+        if batch_i < start_step * grad_accum:
+            continue
+
         chosen_ids = batch["chosen_input_ids"].to(device)
         chosen_mask = batch["chosen_attention_mask"].to(device)
         chosen_labels = batch["chosen_labels"].to(device)
@@ -385,13 +429,9 @@ def main(config_path: str = None):
         chosen_resp_mask = (chosen_labels != -100).long()
         rejected_resp_mask = (rejected_labels != -100).long()
 
-        # Get reference log-probs for this batch
-        bs = chosen_ids.size(0)
-        ref_c = ref_chosen_logps_all[sample_idx:sample_idx + bs].to(device)
-        ref_r = ref_rejected_logps_all[sample_idx:sample_idx + bs].to(device)
-        sample_idx += bs
+        ref_c = batch["ref_chosen_logp"].to(device)
+        ref_r = batch["ref_rejected_logp"].to(device)
 
-        # Forward pass
         with torch.amp.autocast("cuda", dtype=amp_dtype):
             chosen_out = model(input_ids=chosen_ids, attention_mask=chosen_mask)
             rejected_out = model(input_ids=rejected_ids, attention_mask=rejected_mask)
@@ -438,10 +478,20 @@ def main(config_path: str = None):
                 running_margin = 0.0
 
             if global_step % save_steps == 0:
-                ckpt_dir = f"{output_dir}/checkpoint-{global_step}"
-                model.save_pretrained(ckpt_dir)
-                tokenizer.save_pretrained(ckpt_dir)
-                console.print(f"  [dim]💾 Saved checkpoint at step {global_step}[/dim]")
+                ckpt_dir = Path(output_dir) / f"checkpoint-{global_step}"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                model.save_pretrained(str(ckpt_dir))
+                tokenizer.save_pretrained(str(ckpt_dir))
+                torch.save(
+                    {
+                        "step": global_step,
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "scaler": scaler.state_dict(),
+                    },
+                    ckpt_dir / "training_state.pt",
+                )
+                console.print(f"  [dim]💾 Saved checkpoint & state at step {global_step}[/dim]")
 
     # =========================================================================
     # Step 7: Save final model
