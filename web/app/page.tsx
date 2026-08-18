@@ -124,6 +124,10 @@ const FAQS = [
     q: "How do I integrate Sift-1B into my existing codebase?",
     a: "Sift-1B provides 100% drop-in compatibility with the OpenAI SDK. Simply point your existing client's base_url to http://localhost:8000/v1 (FastAPI) or http://localhost:11434 (Ollama). No structural code rewrites are required.",
   },
+  {
+    q: "What dataset was used to fine-tune Sift-1B?",
+    a: "Sift-1B was fine-tuned using a 10,000-sample curated subset of the Salesforce xLAM Function Calling dataset (Salesforce/xlam-function-calling-60k on Hugging Face), formatted into ChatML multi-turn schema representations, followed by DPO alignment on synthetic clean vs noisy JSON pairs.",
+  },
 ];
 
 // =============================================================================
@@ -187,6 +191,14 @@ export default function HomePage() {
 
           {/* Right Actions */}
           <div className="flex items-center gap-4">
+            <a
+              href="https://x.com/sanatan_152"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-mono text-[#A1A1AA] hover:text-white transition-colors items-center gap-1.5 hidden sm:flex"
+            >
+              𝕏 @sanatan_152
+            </a>
             <a
               href="https://huggingface.co/SanatanSinghVishen/sift-1b-gguf"
               target="_blank"
@@ -530,15 +542,15 @@ export default function HomePage() {
             </div>
             <div className="divide-y divide-[#27272A]/50">
               {[
-                ["Base Architecture", "Qwen2.5-1.5B-Instruct"],
-                ["Quantization", "QLoRA (4-bit NF4) / GGUF Q4_K_M"],
-                ["Adapter Hyperparameters", "r=16, α=32, target_modules=[q,k,v,o,gate,up,down]"],
-                ["SFT Dataset", "Salesforce/xlam-function-calling-60k (10,000 ChatML rows)"],
-                ["DPO Preference Strategy", "Synthetically mutated negative pairs (syntax + args)"],
-                ["Optimal Alignment Step", "Step 750 Golden Checkpoint (β=0.1, sigmoid loss)"],
-                ["Hardware", "NVIDIA RTX 3050 (4 GB VRAM) & Tesla T4"],
-                ["Export Formats", "GGUF Q4_K_M (940 MB) + SafeTensors Fused Weights"],
-              ].map(([key, val]) => (
+                { key: "Base Architecture", val: "Qwen2.5-1.5B-Instruct", href: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct" },
+                { key: "Quantization", val: "QLoRA (4-bit NF4) / GGUF Q4_K_M" },
+                { key: "Adapter Hyperparameters", val: "r=16, α=32, target_modules=[q,k,v,o,gate,up,down]" },
+                { key: "SFT Dataset", val: "Salesforce/xlam-function-calling-60k (10,000 ChatML rows)", href: "https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k" },
+                { key: "DPO Preference Strategy", val: "Synthetically mutated negative pairs (syntax + args)" },
+                { key: "Optimal Alignment Step", val: "Step 750 Golden Checkpoint (β=0.1, sigmoid loss)" },
+                { key: "Hardware", val: "NVIDIA RTX 3050 (4 GB VRAM) & Tesla T4" },
+                { key: "Export Formats", val: "GGUF Q4_K_M (940 MB) + SafeTensors Fused Weights", href: "https://huggingface.co/SanatanSinghVishen/sift-1b-gguf" },
+              ].map(({ key, val, href }) => (
                 <div
                   key={key}
                   className="flex flex-col sm:flex-row sm:items-center px-8 py-4 text-sm hover:bg-white/[0.02] transition-colors gap-1 sm:gap-0"
@@ -546,7 +558,19 @@ export default function HomePage() {
                   <span className="w-64 text-[#A1A1AA] font-normal shrink-0">
                     {key}
                   </span>
-                  <span className="font-mono text-white/90 text-xs sm:text-sm">{val}</span>
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-white hover:text-white underline decoration-white/30 hover:decoration-white transition-all text-xs sm:text-sm inline-flex items-center gap-1.5"
+                    >
+                      <span>{val}</span>
+                      <span className="text-xs text-white/50">↗</span>
+                    </a>
+                  ) : (
+                    <span className="font-mono text-white/90 text-xs sm:text-sm">{val}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -742,6 +766,17 @@ export default function HomePage() {
                 </a>
 
                 <a
+                  href="https://x.com/sanatan_152"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 px-5 py-3.5 rounded-full border border-[#27272A] bg-[#151515] text-sm text-[#A1A1AA] hover:text-white hover:border-white/30 transition-all group"
+                >
+                  <span className="font-mono text-white text-xs">𝕏</span>
+                  <span className="font-medium text-white/90">@sanatan_152 on 𝕏 (Twitter)</span>
+                  <span className="ml-auto text-xs text-white/40 group-hover:text-white transition-colors">↗</span>
+                </a>
+
+                <a
                   href="https://www.linkedin.com/in/sanatansingh380/"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -835,6 +870,14 @@ export default function HomePage() {
             </div>
             <div className="flex items-center gap-8 text-sm text-[#A1A1AA]">
               <a
+                href="https://x.com/sanatan_152"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white transition-colors"
+              >
+                𝕏 (Twitter)
+              </a>
+              <a
                 href="https://huggingface.co/SanatanSinghVishen/sift-1b-gguf"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -843,7 +886,7 @@ export default function HomePage() {
                 Hugging Face
               </a>
               <a
-                href="https://github.com/SanatanSinghVishen/Sift"
+                href="https://github.com/SanatanSinghVishen/Sift-1B"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-white transition-colors"

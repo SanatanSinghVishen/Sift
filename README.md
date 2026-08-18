@@ -11,6 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Hugging Face GGUF](https://img.shields.io/badge/🤗%20GGUF-sift--1b--gguf-yellow?style=for-the-badge)](https://huggingface.co/SanatanSinghVishen/sift-1b-gguf)
 [![Hugging Face DPO](https://img.shields.io/badge/🤗%20DPO%20Adapter-sift--1b--dpo-orange?style=for-the-badge)](https://huggingface.co/SanatanSinghVishen/sift-1b-dpo)
+[![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Dataset-xlam--60k-blue?style=for-the-badge)](https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k)
 
 ---
 
@@ -216,7 +217,7 @@ Run low-level GGUF inference directly from the command line:
 | **Quantization** | QLoRA 4-bit NF4 (`load_in_4bit=True`) |
 | **LoRA Config** | Rank $r=16$, Alpha $\alpha=32$, Dropout $0$ |
 | **Target Modules** | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` |
-| **SFT Dataset** | 10,000 ChatML multi-turn function calling rows (Salesforce/xlam-60k sample) |
+| **SFT Dataset** | 10,000 ChatML multi-turn function calling rows ([Salesforce/xlam-function-calling-60k](https://huggingface.co/datasets/Salesforce/xlam-function-calling-60k) sample) |
 | **DPO Dataset** | 10,000 synthetic preference pairs ($y_w$ clean JSON vs $y_l$ markdown fluff) |
 | **DPO Temperature ($\beta$)** | `0.1` (Sigmoid loss) |
 | **Training Compute** | 1x NVIDIA RTX 3050 GPU (4 GB VRAM budget) |
