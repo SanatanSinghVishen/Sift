@@ -145,8 +145,12 @@ def main(config_path: str = None):
         warmup_ratio=config["training"]["warmup_ratio"],
         weight_decay=config["training"]["weight_decay"],
         fp16=config["training"]["fp16"],
+        bf16=config["training"].get("bf16", True),
         logging_steps=config["training"]["logging_steps"],
         save_strategy=config["training"]["save_strategy"],
+        save_steps=config["training"].get("save_steps", 500),
+        dataset_num_proc=1,
+        dataloader_num_workers=0,
         seed=config["training"]["seed"],
         optim=config["training"]["optim"],
         max_length=config["model"]["max_seq_length"],
@@ -164,11 +168,17 @@ def main(config_path: str = None):
     )
 
     # =========================================================================
-    # Step 6: Train!
+    # Step 6: Train! (With auto-resume support)
     # =========================================================================
-    console.print("[bold green]🚀 Starting DPO alignment...[/bold green]\n")
+    from transformers.trainer_utils import get_last_checkpoint
+    last_checkpoint = get_last_checkpoint(output_dir) if Path(output_dir).exists() else None
 
-    train_result = dpo_trainer.train()
+    if last_checkpoint:
+        console.print(f"[yellow]📦 Resuming DPO from {last_checkpoint}...[/yellow]\n")
+        train_result = dpo_trainer.train(resume_from_checkpoint=last_checkpoint)
+    else:
+        console.print("[bold green]🚀 Starting DPO alignment...[/bold green]\n")
+        train_result = dpo_trainer.train()
 
     console.print(f"\n[bold green]✓ DPO alignment complete![/bold green]")
     console.print(f"  Total steps:  {train_result.global_step}")
